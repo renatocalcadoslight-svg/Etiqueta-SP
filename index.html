@@ -383,7 +383,7 @@ const SB = supabase.createClient(
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFtb3NvYm13Zm9senpianh0cXJlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgzNzMwMTcsImV4cCI6MjEwMzk0OTAxN30.yhnPht5Me4XgVN85QA9-zjEjXEOLq8t6rHEABqiSwzQ'
 );
 const DOC_ID = 'etiquetas-sp';
-const CHAVES = ['etq_man2','etq_raw','etq_buf','etq_hold','etq_subs','etq_lote','etq_hist'];
+const CHAVES = ['etq_man2','etq_raw','etq_buf','etq_hold','etq_subs','etq_lote'];
 
 let sincronizando = false;
 let filaSync = null;
@@ -392,25 +392,41 @@ async function baixaNuvem(){
   const { data, error } = await SB.from('app_state')
     .select('data').eq('id', DOC_ID).single();
   if (error || !data?.data) return false;
+
+  const hash = JSON.stringify(data.data);
+  if (hash === ultimoEnvio) return false;  // é o eco do meu próprio envio
+  ultimoEnvio = hash;
+
   sincronizando = true;
-  CHAVES.forEach(k => {
-    if (data.data[k] !== undefined) localStorage.setItem(k, data.data[k]);
-  });
+  CHAVES.forEach(k => { if (data.data[k] !== undefined) localStorage.setItem(k, data.data[k]); });
   sincronizando = false;
-  return true;
+  return true;   // mudou de verdade → aí sim recarrega o estado
 }
+
+
+let ultimoEnvio = '';
 
 function enviaNuvem(){
   clearTimeout(filaSync);
   filaSync = setTimeout(async () => {
     const payload = {};
     CHAVES.forEach(k => { const v = localStorage.getItem(k); if (v !== null) payload[k] = v; });
+
+    const hash = JSON.stringify(payload);
+    if (hash === ultimoEnvio) return;   // nada novo → não grava
+    ultimoEnvio = hash;
+
     const { error } = await SB.from('app_state')
       .upsert({ id: DOC_ID, data: payload, updated_at: new Date() });
     const el = document.querySelector('#info');
-    if (el) el.textContent = error ? '⚠ Falha ao sincronizar' : '☁ Sincronizado ' + new Date().toLocaleTimeString('pt-BR');
-  }, 800); // debounce: agrupa gravações
+    if (el) el.textContent = error ? '⚠ Falha ao sincronizar'
+      : '☁ Sincronizado ' + new Date().toLocaleTimeString('pt-BR');
+  }, 1500);
 }
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) clearTimeout(filaSync);
+});
+
 
 /* intercepta as gravações existentes — nenhuma outra linha do app muda */
 const _set = localStorage.setItem.bind(localStorage);
@@ -1373,12 +1389,41 @@ function imprimirRel(){
 SB.channel('estado')
   .on('postgres_changes',
       { event: 'UPDATE', schema: 'public', table: 'app_state', filter: `id=eq.${DOC_ID}` },
-      async () => {
-        if (document.hasFocus()) return; // não atropela quem está digitando
-        await baixaNuvem();
-        location.reload();
+      async payload => {
+        const hash = JSON.stringify(payload.new?.data || {});
+        if (hash === ultimoEnvio) return;   // é o eco do meu próprio envio
+        ultimoEnvio = hash;
+
+        if (document.hasFocus()) {          // estou digitando: só avisa
+          const el = document.querySelector('#info');
+          if (el) el.innerHTML = '🔄 Há dados novos de outro dispositivo — '
+            + '<a href="#" onclick="aplicaRemoto();return false">atualizar</a>';
+          return;
+        }
+        aplicaRemoto(payload.new.data);
       })
   .subscribe();
+
+  async function aplicaRemoto(dados){
+  if (!dados) { if (!await baixaNuvem()) return; }
+  else {
+    sincronizando = true;
+    CHAVES.forEach(k => { if (dados[k] !== undefined) localStorage.setItem(k, dados[k]); });
+    sincronizando = false;
+  }
+
+  // recarrega o estado em memória — mesmo que restauraBackup faz
+  manuais = JSON.parse(localStorage.getItem('etq_man2') || '[]');
+  buffer  = JSON.parse(localStorage.getItem(K_BUF)  || '[]');
+  retidos = JSON.parse(localStorage.getItem(K_HOLD) || '[]');
+  rawRows = JSON.parse(localStorage.getItem(K_RAW)  || 'null');
+  subs    = { ...BASE, ...JSON.parse(localStorage.getItem('etq_subs') || '{}') };
+  $('#lote').value = localStorage.getItem(K_LOTE) || '';
+  planilha = rawRows ? boxes(rawRows, CAP_MIN, CAP_MAX) : [];
+
+  showBuf(); render(); renderSubs(); tabelaEdit();
+  $('#info').textContent = '☁ Atualizado ' + new Date().toLocaleTimeString('pt-BR');
+}
 
 </script>
 </body>
