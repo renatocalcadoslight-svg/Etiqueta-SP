@@ -100,6 +100,8 @@ details summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--pri-d)
 #pend:not(:empty){background:#fffbeb;border:1px solid #fde68a;border-radius:var(--r-sm);
   padding:10px 13px;margin-bottom:14px}
 #pend a{color:#9a3412}
+.alerta-sync{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;
+  border-radius:var(--r-sm);padding:10px 13px;margin-bottom:14px;font-size:13px;display:none}
 
 .prev{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
   box-shadow:var(--sh);padding:14px;overflow:auto}
@@ -162,9 +164,16 @@ table.grd td.tc{font-weight:800;background:#f7f9fc}
 .chk{width:auto!important;transform:scale(1.25);cursor:pointer}
 .cnt.hd-c{background:#fde68a!important;color:#92400e!important}
 
+/* substituições */
+#subList table,#subPend table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+#subList th,#subList td,#subPend th,#subPend td{border-bottom:1px solid #f0f3f8;padding:7px 10px;text-align:left}
+#subList th,#subPend th{background:#f7f9fc;color:var(--mut);font-size:11px;
+  text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--line)}
+#subList td.n,#subList th.n,#subPend td.n,#subPend th.n{text-align:right}
+
 @media print{
   body{margin:0;background:#fff}
-  .top,h2.page,h3.sec,.bar,.tabs,.panel,.card,.kpis,.warn,.ok,#pend,button{display:none!important}
+  .top,h2.page,h3.sec,.bar,.tabs,.panel,.card,.kpis,.warn,.ok,#pend,.alerta-sync,button{display:none!important}
   .pane{display:none!important}
   #pn-etq,#prev{display:block!important}
   .wrap{padding:0;max-width:none}
@@ -190,6 +199,8 @@ table.grd td.tc{font-weight:800;background:#f7f9fc}
 </div></div>
 
 <div class="wrap">
+<div class="alerta-sync" id="syncWarn"></div>
+
 <div class="tabs">
   <button id="tb-etq" class="on" onclick="aba('etq')">🏷 Etiquetas <span class="cnt" id="cEtq">0</span></button>
   <button id="tb-edi" onclick="aba('edi')">📝 Editar <span class="cnt" id="cLin">0</span></button>
@@ -203,9 +214,9 @@ table.grd td.tc{font-weight:800;background:#f7f9fc}
     <h3>Origem dos dados</h3>
     <div class="bar" style="margin:0">
       <input type="file" id="f" accept=".xlsx,.xls">
-      <label>Lote <input id="lote" size="12" placeholder="280826-SP" oninput="render()"></label>
+      <label>Lote <input id="lote" size="12" placeholder="280826-SP" oninput="salvaLote()"></label>
       <button class="pri" onclick="print()">🖨 Imprimir</button>
-      <button onclick="restauraBackup(0)">↩ Restaurar backup</button>
+      <button onclick="listaBackups()">↩ Restaurar backup</button>
       <button class="dng" onclick="zerarTudo()">🧹 Zerar tudo</button>
       <span id="info" class="hint" style="margin:0"></span>
     </div>
@@ -342,110 +353,156 @@ table.grd td.tc{font-weight:800;background:#f7f9fc}
   <div class="panel">
     <h3>➕ Nova substituição</h3>
     <div class="bar" style="margin:0">
-      <input id="sDe" size="34" placeholder="DE (descrição da planilha)"
+      <input id="sDe" size="30" placeholder="DE — como vem na planilha"
         onkeydown="if(event.key==='Enter')document.getElementById('sPara').focus()">
-      <span style="color:var(--mut)">➜</span>
-      <input id="sPara" size="24" placeholder="PARA (código final)"
+      <span style="color:var(--mut)">→</span>
+      <input id="sPara" size="24" placeholder="PARA — código do sistema"
         onkeydown="if(event.key==='Enter')addSub()">
       <button class="pri" onclick="addSub()">Salvar</button>
       <span id="sMsg" class="warn"></span>
     </div>
+    <div class="hint">O tamanho nunca entra aqui — mapeie apenas a referência/cor.</div>
     <details style="margin-top:12px">
-      <summary>Colar várias / importar-exportar</summary>
+      <summary>Importar em lote</summary>
       <textarea id="sBulk" rows="5" style="width:100%;margin-top:8px"
-        placeholder="TENIS PRETO PTOPTO = LGHT02-PTOPTO&#10;SANDALIA X;SNDX01&#10;BOTA Y -> BTY03"></textarea>
+        placeholder="LGHT 02 PRETO PRETO = LGHT02-PTOPTO&#10;ARANHA VELCRO -> LGHT013-ARAV"></textarea>
       <div class="bar" style="margin:8px 0 0">
-        <button onclick="importaSubs()">Importar do texto</button>
+        <button class="pri" onclick="importaSubs()">Importar</button>
         <button onclick="exportaSubs()">⬇ Exportar CSV</button>
-        <label>Importar CSV: <input type="file" id="sFile" accept=".csv,.xlsx,.xls"></label>
+        <button class="dng" onclick="limpaSubs()">🗑 Limpar todas</button>
+        <span id="sInfo" class="ok"></span>
       </div>
+      <div class="hint">Separadores aceitos: <b>=</b> <b>=&gt;</b> <b>-&gt;</b> <b>;</b> tab ou <b>|</b></div>
     </details>
   </div>
 
   <div class="bar">
-    <input id="sFiltro" size="28" placeholder="🔎 filtrar..." oninput="renderSubs()">
-    <button class="dng" onclick="limpaSubs()">🗑 Limpar todas</button>
-    <span id="sInfo" class="ok"></span>
+    <input id="sFiltro" size="26" placeholder="🔎 filtrar..." oninput="renderSubs()">
   </div>
 
-  <h3 class="sec">Códigos da planilha sem substituição</h3>
+  <h3 class="sec">⚠ Sem substituição cadastrada</h3>
   <div class="card" id="subPend"></div>
 
-  <h3 class="sec">Substituições cadastradas</h3>
+  <h3 class="sec">Substituições ativas</h3>
   <div class="card" id="subList"></div>
 </div>
 </div>
 
 <script>
-/* ===== SYNC NUVEM (Supabase) ===== */
+/* ================= CHAVES (antes de tudo: o sync as referencia) ================= */
+const K_MAN='etq_man2', K_RAW='etq_raw', K_LOTE='etq_lote',
+      K_BUF='etq_buf', K_HOLD='etq_hold', K_SUBS='etq_subs', K_HIST='etq_hist';
+const CHAVES=[K_MAN,K_RAW,K_BUF,K_HOLD,K_SUBS,K_LOTE];
+
+const $=s=>document.querySelector(s);
+
+/* ================= SUPABASE ================= */
 const SB = supabase.createClient(
   'https://amosobmwfolzzbjxtqre.supabase.co',
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFtb3NvYm13Zm9senpianh0cXJlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgzNzMwMTcsImV4cCI6MjEwMzk0OTAxN30.yhnPht5Me4XgVN85QA9-zjEjXEOLq8t6rHEABqiSwzQ'
 );
-const DOC_ID = 'etiquetas-sp';
-const CHAVES = ['etq_man2','etq_raw','etq_buf','etq_hold','etq_subs','etq_lote'];
+const DOC_ID='etiquetas-sp';
 
-let sincronizando = false;
-let filaSync = null;
+/* interceptador PRIMEIRO: baixaNuvem usa _set/_rem e não realimenta o envio */
+const _set=localStorage.setItem.bind(localStorage);
+const _rem=localStorage.removeItem.bind(localStorage);
+localStorage.setItem=(k,v)=>{ _set(k,v); if(!sincronizando&&CHAVES.includes(k))enviaNuvem(); };
+localStorage.removeItem=k=>{ _rem(k);   if(!sincronizando&&CHAVES.includes(k))enviaNuvem(); };
+
+let sincronizando=false, filaSync=null, ultimoEnvio='';
+let prontoParaEnviar=false;      /* PATCH 1: trava de boot */
+let zeragemIntencional=false;    /* PATCH 2: só zerarTudo libera envio vazio */
+
+const assina=o=>JSON.stringify(CHAVES.map(k=>o?.[k]??null));
+
+function avisoSync(msg){
+  const el=$('#syncWarn'); if(!el)return;
+  el.innerHTML=msg||''; el.style.display=msg?'block':'none';
+}
+
+/* PATCH 3: retidos nunca são apagados por ausência remota — e são unidos, não substituídos */
+function mesclaHold(remoto){
+  let local=[], rem=[];
+  try{ local=JSON.parse(localStorage.getItem(K_HOLD)||'[]'); }catch(e){}
+  try{ rem=JSON.parse(remoto||'[]'); }catch(e){ return; }
+  const m=new Map();
+  [...local,...rem].forEach(l=>{
+    if(!l||!l.cod)return;
+    const a=m.get(l.cod);
+    if(!a||(+l.qty||0)>(+a.qty||0)) m.set(l.cod,{cod:l.cod,qty:+l.qty||0,cx:l.cx||0});
+  });
+  _set(K_HOLD,JSON.stringify([...m.values()]));
+}
 
 async function baixaNuvem(){
-  const { data, error } = await SB.from('app_state')
-    .select('data').eq('id', DOC_ID).single();
-  if (error || !data?.data) return false;
-
-  const hash = JSON.stringify(data.data);
-  if (hash === ultimoEnvio) return false;  // é o eco do meu próprio envio
-  ultimoEnvio = hash;
-
-  sincronizando = true;
-  CHAVES.forEach(k => { if (data.data[k] !== undefined) localStorage.setItem(k, data.data[k]); });
-  sincronizando = false;
-  return true;   // mudou de verdade → aí sim recarrega o estado
+  const {data,error}=await SB.from('app_state').select('data').eq('id',DOC_ID).maybeSingle();
+  if(error||!data?.data)return false;
+  const hash=assina(data.data);
+  if(hash===ultimoEnvio)return false;
+  ultimoEnvio=hash;
+  sincronizando=true;
+  CHAVES.forEach(k=>{
+    const v=data.data[k];
+    if(k===K_HOLD){                     /* append-only */
+      if(v!==null&&v!==undefined) mesclaHold(v);
+      return;                           /* ausência remota NUNCA apaga retidos */
+    }
+    if(v===null||v===undefined) _rem(k);
+    else _set(k,v);
+  });
+  sincronizando=false;
+  return true;
 }
 
-
-let ultimoEnvio = '';
+function payloadVazio(p){
+  return CHAVES.every(k=>{
+    const v=p[k];
+    return v===null||v===undefined||v===''||v==='[]'||v==='{}';
+  });
+}
 
 function enviaNuvem(){
+  if(!prontoParaEnviar)return;          /* PATCH 1 */
   clearTimeout(filaSync);
-  filaSync = setTimeout(async () => {
-    const payload = {};
-    CHAVES.forEach(k => { const v = localStorage.getItem(k); if (v !== null) payload[k] = v; });
+  filaSync=setTimeout(async()=>{
+    const payload={};
+    CHAVES.forEach(k=>{ payload[k]=localStorage.getItem(k); });
 
-    const hash = JSON.stringify(payload);
-    if (hash === ultimoEnvio) return;   // nada novo → não grava
-    ultimoEnvio = hash;
+    if(payloadVazio(payload)&&!zeragemIntencional){   /* PATCH 2 */
+      ultimoEnvio='';
+      $('#info').textContent='⚠ Envio vazio bloqueado (proteção)';
+      avisoSync('🛡 Um envio com <b>estado totalmente vazio</b> foi bloqueado. '
+        +'Nada foi apagado na nuvem. Se você realmente quer limpar, use <b>🧹 Zerar tudo</b>.');
+      return;
+    }
+    zeragemIntencional=false;
 
-    const { error } = await SB.from('app_state')
-      .upsert({ id: DOC_ID, data: payload, updated_at: new Date() });
-    const el = document.querySelector('#info');
-    if (el) el.textContent = error ? '⚠ Falha ao sincronizar'
-      : '☁ Sincronizado ' + new Date().toLocaleTimeString('pt-BR');
-  }, 1500);
+    const hash=assina(payload);
+    if(hash===ultimoEnvio)return;
+    ultimoEnvio=hash;
+
+    const {error}=await SB.from('app_state')
+      .upsert({id:DOC_ID,data:payload,updated_at:new Date()});
+    $('#info').textContent=error?'⚠ Falha ao sincronizar'
+      :'☁ Sincronizado '+new Date().toLocaleTimeString('pt-BR');
+    if(!error)avisoSync('');
+  },1500);
 }
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) clearTimeout(filaSync);
+
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden){ snapshot(); clearTimeout(filaSync); return; }
+  baixaNuvem().then(m=>{ if(m)recarregaEstado(); });
 });
 
+/* ================= CONFIG ================= */
+const CAP_MIN=20, CAP_MAX=25, LIN_FIXAS=5;
 
-/* intercepta as gravações existentes — nenhuma outra linha do app muda */
-const _set = localStorage.setItem.bind(localStorage);
-const _rem = localStorage.removeItem.bind(localStorage);
-localStorage.setItem = (k, v) => { _set(k, v); if (!sincronizando && CHAVES.includes(k)) enviaNuvem(); };
-localStorage.removeItem = k => { _rem(k); if (!sincronizando && CHAVES.includes(k)) enviaNuvem(); };
-
-/* ===== CONFIGURAÇÃO FIXA (regras internas) ===== */
-const CAP_MIN   = 20;
-const CAP_MAX   = 25;
-const LIN_FIXAS = 5;
-
-const $=s=>document.querySelector(s);
 const num=v=>typeof v==='number'?v:(v!=null&&v!==''&&!isNaN(v)?+v:null);
 const norm=s=>String(s).toUpperCase().replace(/\s+/g,' ').trim();
 const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
 const tot=b=>b.rows.reduce((s,x)=>s+x.qty,0);
 
-/* ===== SUBSTITUIÇÕES PADRÃO (embutidas) ===== */
+/* ================= SUBSTITUIÇÕES PADRÃO ================= */
 const SUBS_PADRAO = {
   "LGHT 010 MARINHO PINK":"LGHT010-MHOPNK","LGHT010-MHOPNK":"LGHT010-MHOPNK",
   "LGHT 010 PRETO AZUL":"LGHT010-PTOAZL","LGHT010-PTOAZL":"LGHT010-PTOAZL",
@@ -520,15 +577,10 @@ const SUBS_PADRAO = {
   "PATRULHA FEMININA":"PCF"
 };
 const BASE=Object.fromEntries(Object.entries(SUBS_PADRAO).map(([k,v])=>[norm(k),norm(v)]));
-let subs={...BASE, ...JSON.parse(localStorage.getItem('etq_subs')||'{}')};
-const salvaSubs=()=>localStorage.setItem('etq_subs',JSON.stringify(subs));
+let subs={...BASE, ...JSON.parse(localStorage.getItem(K_SUBS)||'{}')};
+const salvaSubs=()=>localStorage.setItem(K_SUBS,JSON.stringify(subs));
 const naoMapeados=new Set();
 
-function codigo(sku){
-  const k=norm(sku);
-  if(subs[k])return subs[k];
-  naoMapeados.add(k);return k;
-}
 function partes(sku,tam){
   let base=String(sku||'').trim(), sz=String(tam||'').trim();
   if(!sz){
@@ -536,6 +588,11 @@ function partes(sku,tam){
     if(m&&m[1].trim()){base=m[1].replace(/[-\s]+$/,'');sz=m[2];}
   }
   return {base:norm(base),sz:sz.replace(/\D/g,'')};
+}
+function codigo(sku){
+  const k=norm(sku);
+  if(subs[k])return subs[k];
+  naoMapeados.add(k);return k;
 }
 function montaCod(sku,tam){
   const {base,sz}=partes(sku,tam);
@@ -545,19 +602,15 @@ function montaCod(sku,tam){
   return cod+(sz?'-'+sz:'');
 }
 
-/* ===== ESTADO + PERSISTÊNCIA AUTOMÁTICA ===== */
-let rawRows=null, planilha=[], buffer=[];
-let manuais=JSON.parse(localStorage.getItem('etq_man2')||'[]');
-
-const K_RAW='etq_raw', K_LOTE='etq_lote', K_BUF='etq_buf', K_HIST='etq_hist', K_HOLD='etq_hold';
-
-/* itens marcados como "NÃO VAI HOJE" — vivem fora das caixas,
-   não entram em etiquetas/relatórios/CSVs e sobrevivem ao Zerar tudo */
-let retidos=JSON.parse(localStorage.getItem(K_HOLD)||'[]');
+/* ================= ESTADO ================= */
+let rawRows=null, planilha=[], buffer=[], manuais=[], retidos=[];
 
 function salvaTudo(){
+  if(!prontoParaEnviar){          /* nunca grava estado-fantasma antes do boot */
+    return;
+  }
   try{
-    localStorage.setItem('etq_man2',JSON.stringify(manuais));
+    localStorage.setItem(K_MAN,JSON.stringify(manuais));
     localStorage.setItem(K_BUF,JSON.stringify(buffer));
     localStorage.setItem(K_HOLD,JSON.stringify(retidos));
     localStorage.setItem(K_LOTE,($('#lote').value||''));
@@ -569,27 +622,83 @@ function salvaTudo(){
   }
 }
 const salva=()=>salvaTudo();
+function salvaLote(){ if(prontoParaEnviar)localStorage.setItem(K_LOTE,$('#lote').value||''); render(); }
 
-setInterval(()=>{
+/* PATCH 4: backup local robusto (grava com _set — nunca sincroniza) */
+function snapshot(){
+  if(!prontoParaEnviar)return;
   try{
-    const hist=JSON.parse(localStorage.getItem(K_HIST)||'[]');
-    hist.unshift({t:Date.now(),man:manuais,raw:rawRows,buf:buffer,hold:retidos,lote:$('#lote').value||''});
-    localStorage.setItem(K_HIST,JSON.stringify(hist.slice(0,5)));
+    const h=JSON.parse(localStorage.getItem(K_HIST)||'[]');
+    const ult=h[0];
+    const agora={t:Date.now(),man:manuais,raw:rawRows,buf:buffer,
+                 hold:retidos,lote:$('#lote').value||''};
+    if(ult&&JSON.stringify(ult.man)===JSON.stringify(agora.man)
+        &&JSON.stringify(ult.hold)===JSON.stringify(agora.hold))return;
+    h.unshift(agora);
+    _set(K_HIST,JSON.stringify(h.slice(0,20)));
   }catch(e){}
-},60000);
+}
+setInterval(snapshot,60000);
+window.addEventListener('beforeunload',snapshot);
 
+function listaBackups(){
+  const h=JSON.parse(localStorage.getItem(K_HIST)||'[]');
+  if(!h.length){alert('Nenhum backup disponível ainda (o primeiro é criado após 1 minuto de uso).');return;}
+  const menu=h.map((b,i)=>`${i} — ${new Date(b.t).toLocaleString('pt-BR')} · `
+    +`${(b.man||[]).length} caixa(s) · ${(b.hold||[]).length} retido(s)`).join('\n');
+  const r=prompt('Backups locais disponíveis:\n\n'+menu+'\n\nDigite o número a restaurar:','0');
+  if(r===null)return;
+  const i=parseInt(r,10);
+  if(!(i>=0)||!h[i]){alert('Número inválido.');return;}
+  restauraBackup(i);
+}
 function restauraBackup(i=0){
   const h=(JSON.parse(localStorage.getItem(K_HIST)||'[]'))[i];
-  if(!h){alert('Nenhum backup disponível ainda (o primeiro é criado após 1 minuto de uso).');return;}
+  if(!h){alert('Backup não encontrado.');return;}
   if(!confirm('Restaurar o backup de '+new Date(h.t).toLocaleString('pt-BR')+'?\nO estado atual será substituído.'))return;
   manuais=h.man||[]; rawRows=h.raw||null; buffer=h.buf||[]; retidos=h.hold||retidos;
   planilha=rawRows?boxes(rawRows,CAP_MIN,CAP_MAX):[];
   $('#lote').value=h.lote||'';
   salvaTudo(); showBuf(); render(); renderSubs(); tabelaEdit();
+  avisoSync('');
+}
+
+function dedupCaixas(arr){
+  const vistas=new Set();
+  return arr.filter(b=>{
+    const sig=(b.sku||'')+'|'+(b.manual?'M':'P')+'|'
+      +b.rows.map(x=>x.cod+':'+x.qty).sort().join(',');
+    if(vistas.has(sig))return false;
+    vistas.add(sig);return true;
+  });
+}
+
+function recarregaEstado(){
+  try{ manuais=JSON.parse(localStorage.getItem(K_MAN)||'[]'); }catch(e){ manuais=[]; }
+  try{ buffer =JSON.parse(localStorage.getItem(K_BUF)||'[]'); }catch(e){ buffer=[]; }
+  try{ retidos=JSON.parse(localStorage.getItem(K_HOLD)||'[]'); }catch(e){ retidos=[]; }
+  try{ subs={...BASE, ...JSON.parse(localStorage.getItem(K_SUBS)||'{}')}; }catch(e){ subs={...BASE}; }
+
+  const r=localStorage.getItem(K_RAW);
+  try{ rawRows=r?JSON.parse(r):null; }catch(e){ rawRows=null; }
+
+  if(rawRows&&manuais.some(b=>b.manual===false)){
+    rawRows=null;
+    sincronizando=true;_rem(K_RAW);sincronizando=false;
+  }
+
+  naoMapeados.clear();
+  planilha=rawRows?boxes(rawRows,CAP_MIN,CAP_MAX):[];
+  manuais =dedupCaixas(manuais.filter(b=>b&&Array.isArray(b.rows)&&b.rows.length));
+  retidos =retidos.filter(l=>l&&l.cod&&+l.qty>0);
+
+  $('#lote').value=localStorage.getItem(K_LOTE)||'';
+  pintaBuf(); render(); renderSubs(); tabelaEdit();
 }
 
 const caixas=()=>[...planilha,...manuais];
 
+/* ================= NAVEGAÇÃO ================= */
 function aba(k){
   ['etq','edi','rel','sub'].forEach(t=>{
     $('#pn-'+t).classList.toggle('on',t===k);
@@ -598,19 +707,19 @@ function aba(k){
   if(k==='edi')tabelaEdit();
   if(k==='rel'){relatorio();subTab(localStorage.getItem('etq_sub')||'resumo');}
   if(k==='sub')renderSubs();
-  document.body.classList.toggle('wide', k==='rel');
+  document.body.classList.toggle('wide',k==='rel');
 }
 function subTab(id){
   document.querySelectorAll('#subtabs button').forEach(b=>b.classList.toggle('on',b.dataset.s===id));
   document.querySelectorAll('.sub').forEach(p=>p.classList.toggle('on',p.id==='s-'+id));
-  localStorage.setItem('etq_sub',id);
+  _set('etq_sub',id);
   if(id==='grade')grade();
 }
 $('#subtabs').addEventListener('click',e=>{
   const b=e.target.closest('button'); if(b)subTab(b.dataset.s);
 });
 
-/* ---------- CRUD substituições ---------- */
+/* ================= CRUD SUBSTITUIÇÕES ================= */
 function addSub(){
   const de=$('#sDe').value.trim(), para=$('#sPara').value.trim();
   $('#sMsg').textContent='';
@@ -637,28 +746,11 @@ function importaSubs(){
   $('#sMsg').textContent=n?'':'Nada reconhecido. Use: DE = PARA';
   if(n){$('#sBulk').value='';salvaSubs();reprocessa();$('#sInfo').textContent=n+' substituição(ões) importada(s).';}
 }
-$('#sFile').addEventListener('change',async e=>{
-  const file=e.target.files[0]; if(!file)return;
-  const wb=XLSX.read(await file.arrayBuffer(),{type:'array'});
-  const rw=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:''});
-  let n=0;
-  rw.forEach(r=>{
-    const de=String(r[0]||'').trim(), para=String(r[1]||'').trim();
-    if(!de||!para)return;
-    if(/^(de|origem|descri)/i.test(de)&&/^(para|codigo|código|sku)/i.test(para))return;
-    subs[norm(de)]=norm(para);n++;
-  });
-  e.target.value='';
-  salvaSubs();reprocessa();
-  $('#sInfo').textContent=n+' substituição(ões) importada(s) do arquivo.';
-});
 function exportaSubs(){
   let csv='DE;PARA\n';
   Object.entries(subs).sort((a,b)=>a[0].localeCompare(b[0],'pt'))
     .forEach(([k,v])=>csv+=`${k};${v}\n`);
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));
-  a.download='substituicoes.csv';a.click();
+  baixa(csv,'substituicoes.csv');
 }
 function usoDe(){
   const m=new Map();
@@ -669,6 +761,7 @@ function usoDe(){
   return m;
 }
 function renderSubs(){
+  if(!$('#subList'))return;
   const f=norm($('#sFiltro').value||''), uso=usoDe();
   const it=Object.entries(subs).filter(([k,v])=>!f||k.includes(f)||v.includes(f))
     .sort((a,b)=>a[0].localeCompare(b[0],'pt',{numeric:true}));
@@ -696,24 +789,26 @@ function reprocessa(){
   naoMapeados.clear();
   if(rawRows)planilha=boxes(rawRows,CAP_MIN,CAP_MAX);
   manuais.forEach(b=>b.rows.forEach(x=>{x.cod=montaCod(x.cod);}));
-  render();renderSubs();
+  salva();render();renderSubs();
 }
 
-/* ---------- zerar (mantém retidos e substituições) ---------- */
+/* ================= ZERAR ================= */
 function zerarTudo(){
   const n=planilha.length+manuais.length+buffer.length;
   if(!n){alert('Não há nada para zerar.');return;}
   if(!confirm(`Apagar TODAS as etiquetas (${planilha.length} da planilha + ${manuais.length} manuais)?\n`
     +`As substituições e os ${retidos.length} item(ns) marcados como “não vai hoje” serão mantidos.`))return;
+  snapshot();                      /* backup antes de destruir */
+  zeragemIntencional=true;         /* PATCH 2: libera o envio, se ficar vazio */
   planilha=[];manuais=[];buffer=[];rawRows=null;naoMapeados.clear();
-  ['etq_man2',K_RAW,K_BUF,K_HIST].forEach(k=>localStorage.removeItem(k)); /* K_HOLD preservado */
+  [K_MAN,K_RAW,K_BUF].forEach(k=>localStorage.removeItem(k));
   $('#f').value='';$('#mRef').value='';$('#mTam').value='';$('#mQt').value='';$('#mBulk').value='';
   $('#eSku').value='';$('#eTam').value='';$('#eQt').value='';$('#eCx').value='';
   $('#mMsg').textContent='';$('#filtro').value='';
   salvaTudo();showBuf();render();renderSubs();tabelaEdit();
 }
 
-/* ---------- entrada manual ---------- */
+/* ================= ENTRADA MANUAL ================= */
 function addLinha(){
   const ref=$('#mRef').value.trim(), tam=$('#mTam').value.trim(), q=+$('#mQt').value;
   $('#mMsg').textContent='';
@@ -724,26 +819,19 @@ function addLinha(){
   $('#mRef').value='';$('#mTam').value='';$('#mQt').value='';
   $('#mRef').focus();showBuf();
 }
-function showBuf(){
+function pintaBuf(){
   $('#buf').innerHTML=buffer.length
     ? buffer.map((x,i)=>`<span>${esc(x.cod)} — <b>${x.qty}</b> <a href="#" onclick="buffer.splice(${i},1);showBuf();return false" style="color:var(--err);text-decoration:none">✕</a></span>`).join('')
       +` <b style="margin-left:6px">Total: ${buffer.reduce((s,x)=>s+x.qty,0)} pares</b>`
     : '<i style="color:var(--mut)">Nenhuma linha na etiqueta em edição.</i>';
-  salvaTudo();
 }
+function showBuf(){ pintaBuf(); salvaTudo(); }
+
 function fechaEtiqueta(){
   if($('#mRef').value.trim()&&+$('#mQt').value>0) addLinha();
   if(!buffer.length){$('#mMsg').textContent='Adicione pelo menos uma linha.';return;}
   manuais.push({manual:true,rows:buffer});buffer=[];salva();showBuf();render();renderSubs();
 }
-function importaBulk(umPorLinha){
-  const rows=parseBulkRows();
-  if(!rows.length){$('#mMsg').textContent='Nada reconhecido. Use: SKU TAMANHO QUANTIDADE';return;}
-  umPorLinha?rows.forEach(r=>manuais.push({manual:true,rows:[r]})):manuais.push({manual:true,rows});
-  $('#mBulk').value='';salva();render();renderSubs();
-}
-
-/* ===== distribuição automática: caixas fixas de CAP_MIN pares ===== */
 function parseBulkRows(){
   const rows=[];
   $('#mBulk').value.split(/\n/).map(l=>l.trim()).filter(Boolean).forEach(l=>{
@@ -754,6 +842,12 @@ function parseBulkRows(){
   });
   return rows;
 }
+function importaBulk(umPorLinha){
+  const rows=parseBulkRows();
+  if(!rows.length){$('#mMsg').textContent='Nada reconhecido. Use: SKU TAMANHO QUANTIDADE';return;}
+  umPorLinha?rows.forEach(r=>manuais.push({manual:true,rows:[r]})):manuais.push({manual:true,rows});
+  $('#mBulk').value='';salva();render();renderSubs();
+}
 
 function distribuiAuto(rows){
   const porRef=new Map();
@@ -762,42 +856,33 @@ function distribuiAuto(rows){
     if(!porRef.has(ref))porRef.set(ref,[]);
     porRef.get(ref).push({cod:r.cod,qty:r.qty});
   });
-
   const novas=[], sobras=[];
-
   const puxa=(fila,n)=>{
     const out=[];
     while(n>0&&fila.length){
-      const it=fila[0];
-      const take=Math.min(it.qty,n);
+      const it=fila[0], take=Math.min(it.qty,n);
       out.push({cod:it.cod,qty:take});
       it.qty-=take; n-=take;
       if(it.qty===0)fila.shift();
     }
     return out;
   };
-
   porRef.forEach(fila=>{
     fila.sort((a,b)=>a.cod.localeCompare(b.cod,'pt',{numeric:true}));
     let rest=fila.reduce((s,x)=>s+x.qty,0);
-    while(rest>=CAP_MIN){
-      novas.push({manual:true,rows:puxa(fila,CAP_MIN)});
-      rest-=CAP_MIN;
-    }
+    while(rest>=CAP_MIN){ novas.push({manual:true,rows:puxa(fila,CAP_MIN)}); rest-=CAP_MIN; }
     if(rest>0)sobras.push({fila,rest});
   });
-
   let cx=null;
   const atual=()=>cx?cx.rows.reduce((s,x)=>s+x.qty,0):CAP_MIN;
   sobras.forEach(s=>{
     while(s.rest>0){
       if(atual()>=CAP_MIN){cx={manual:true,rows:[]};novas.push(cx);}
-      const espaco=CAP_MIN-atual(), take=Math.min(espaco,s.rest);
+      const take=Math.min(CAP_MIN-atual(),s.rest);
       cx.rows.push(...puxa(s.fila,take));
       s.rest-=take;
     }
   });
-
   novas.forEach(b=>{
     const m=new Map();
     b.rows.forEach(x=>m.set(x.cod,(m.get(x.cod)||0)+x.qty));
@@ -807,44 +892,42 @@ function distribuiAuto(rows){
   });
   return novas;
 }
-
 function importaBulkAuto(){
   const rows=parseBulkRows();
   if(!rows.length){$('#mMsg').textContent='Nada reconhecido. Use: SKU TAMANHO QUANTIDADE';return;}
   const novas=distribuiAuto(rows);
   manuais.push(...novas);
-  $('#mBulk').value='';
-  $('#mMsg').textContent='';
+  $('#mBulk').value='';$('#mMsg').textContent='';
   salva();render();renderSubs();
   $('#info').textContent=`${novas.length} caixa(s) de ${CAP_MIN} pares geradas.`;
 }
-
 function redistribui20(){
   const rows=[];
   caixas().forEach(b=>b.rows.forEach(x=>rows.push({cod:x.cod,qty:x.qty})));
   if(!rows.length){alert('Não há linhas para redistribuir.');return;}
   if(!confirm('Refazer todas as caixas em pacotes de '+CAP_MIN+' pares?\nItens retidos não são afetados.'))return;
+  snapshot();
   planilha=[];rawRows=null;
+  sincronizando=true;_rem(K_RAW);sincronizando=false;
   manuais=distribuiAuto(rows);
   commit(manuais.length+' caixa(s) geradas.');
 }
-
 function delEt(i){
-  const b=caixas()[i];
-  if(!b)return;
+  const b=caixas()[i]; if(!b)return;
   let k=manuais.indexOf(b);
-  if(k>-1){manuais.splice(k,1);}
+  if(k>-1)manuais.splice(k,1);
   else{k=planilha.indexOf(b); if(k>-1)planilha.splice(k,1);}
   salva();render();
 }
-function limpaManuais(){if(confirm('Remover todas as etiquetas manuais?')){manuais=manuais.filter(b=>!b.manual);salva();render();}}
 
-/* ---------- planilha ---------- */
+/* ================= PLANILHA ================= */
 $('#f').addEventListener('change',async e=>{
   if(!e.target.files[0])return;
+  snapshot();
   const wb=XLSX.read(await e.target.files[0].arrayBuffer(),{type:'array'});
   rawRows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:null});
-  reprocessa();
+  manuais=manuais.filter(b=>b.manual);
+  reprocessa();tabelaEdit();
 });
 function isHeader(r){
   const idx=[];
@@ -874,14 +957,9 @@ function boxes(rows,capMin,capMax){
     if(!its.length)continue;
     const raw=String(r[0]||'').trim(), sku=raw||last; if(raw)last=raw;
     const qLinha=its.reduce((s,x)=>s+x.qty,0);
-
     let b=(pend&&pend.sku===sku)?pend:null;
-
-    if(b&&tot(b)<capMin&&qLinha>=capMin){
-      b.alerta=true; fecha(b); b=null; pend=null;
-    }
+    if(b&&tot(b)<capMin&&qLinha>=capMin){ b.alerta=true; fecha(b); b=null; pend=null; }
     if(!b){ if(pend)fecha(pend); b={sku,rows:[]}; }
-
     const cod=codigo(sku);
     b.rows.push(...its.sort((a,c)=>a.size-c.size).map(x=>({cod:`${cod}-${x.size}`,qty:x.qty})));
     if(tot(b)>=capMin){fecha(b);pend=null;}else pend=b;
@@ -891,20 +969,21 @@ function boxes(rows,capMin,capMax){
   return out;
 }
 
-/* ========== ABA EDITAR ========== */
+/* ================= ABA EDITAR ================= */
 function materializa(){
   if(!planilha.length&&!rawRows)return;
-  planilha.forEach(b=>manuais.push({manual:false,sku:b.sku,alerta:!!b.alerta,
+  const novos=planilha.map(b=>({manual:false,sku:b.sku,alerta:!!b.alerta,
     rows:b.rows.map(x=>({cod:x.cod,qty:x.qty}))}));
-  const novos=manuais.splice(manuais.length-planilha.length,planilha.length);
-  manuais=[...novos,...manuais];
-  planilha=[];rawRows=null;salva();
+  manuais=dedupCaixas([...novos,...manuais]);
+  planilha=[];rawRows=null;
+  sincronizando=true;_rem(K_RAW);sincronizando=false;
+  salva();
 }
 function recalcAlertas(){
   manuais.forEach(b=>{b.alerta=tot(b)<CAP_MIN;});
   planilha.forEach(b=>{b.alerta=tot(b)<CAP_MIN;});
 }
-function limpaVazias(){manuais=manuais.filter(b=>b.rows.length);}
+function limpaVazias(){ manuais=dedupCaixas(manuais.filter(b=>b.rows.length)); }
 function commit(msg){
   const wy=window.scrollY;
   limpaVazias();recalcAlertas();salva();
@@ -914,12 +993,12 @@ function commit(msg){
   requestAnimationFrame(()=>window.scrollTo(0,wy));
 }
 
-
-/* ===== RETIDOS ("não vai hoje") ===== */
+/* ===== RETIDOS ===== */
 function holdLinha(i,j){
   const b=ref(i); if(!b||!b.rows[j])return;
   const l=b.rows.splice(j,1)[0];
   retidos.push({cod:l.cod,qty:l.qty,cx:i+1});
+  snapshot();
   commit('“'+l.cod+'” marcado como NÃO VAI HOJE.');
 }
 function unholdLinha(k){
@@ -974,8 +1053,9 @@ function tabelaHold(){
 }
 
 function tabelaEdit(){
-  const box=$('#tabEdit .tbl-wrap');                 /* ⬅ NOVO */
-  const sy=box?box.scrollTop:0, wy=window.scrollY;   /* ⬅ NOVO */
+  if(!$('#tabEdit'))return;
+  const box=$('#tabEdit .tbl-wrap');
+  const sy=box?box.scrollTop:0, wy=window.scrollY;
 
   const f=norm($('#eFiltro').value||''), bx=caixas();
   const nLin=bx.reduce((s,b)=>s+b.rows.length,0);
@@ -1008,11 +1088,10 @@ function tabelaEdit(){
   $('#tabEdit').innerHTML=html;
   tabelaHold();
 
-  const nb=$('#tabEdit .tbl-wrap');                  /* ⬅ NOVO */
+  const nb=$('#tabEdit .tbl-wrap');
   if(nb) nb.scrollTop=sy;
   window.scrollTo(0,wy);
 }
-
 
 function ref(i){materializa();return manuais[i];}
 function setQty(i,j,v){
@@ -1032,14 +1111,14 @@ function setCaixa(i,j,v){
   const b=ref(i);
   if(d===i+1){tabelaEdit();return;}
   const linha=b.rows.splice(j,1)[0];
-  if(d>manuais.length){manuais.push({manual:true,rows:[linha]});}
-  else{manuais[d-1].rows.push(linha);}
+  if(d>manuais.length)manuais.push({manual:true,rows:[linha]});
+  else manuais[d-1].rows.push(linha);
   commit(`Linha movida para a caixa ${Math.min(d,manuais.length)}.`);
 }
 function delLinha(i,j){const b=ref(i); b.rows.splice(j,1); commit('Linha removida.');}
 function delCaixa(i){
   if(!confirm('Excluir a caixa '+(i+1)+' e todas as suas linhas?'))return;
-  materializa(); manuais.splice(i,1); commit('Caixa excluída.');
+  snapshot(); materializa(); manuais.splice(i,1); commit('Caixa excluída.');
 }
 function novaCaixa(){
   materializa(); manuais.push({manual:true,rows:[]});
@@ -1067,7 +1146,7 @@ function reordenar(){
   commit('Linhas reordenadas.');
 }
 
-/* ---------- render etiquetas ---------- */
+/* ================= RENDER ETIQUETAS ================= */
 const ctx=document.createElement('canvas').getContext('2d');
 const PT=mm=>mm*2.83465;
 function ptQueCabe(t,wMM,hMM){
@@ -1118,10 +1197,8 @@ function render(){
       : '');
 
   $('#prev').innerHTML=n?bx.map((b,i)=>{
-    const av = b.alerta
-      ? `<div class="aviso">⚠ QUANTIDADE INFERIOR AO MÍNIMO (${tot(b)} PARES) — REVISAR</div>`
-      : '';
-    const areaU = b.alerta ? AREA-6 : AREA;
+    const av=b.alerta?`<div class="aviso">⚠ QUANTIDADE INFERIOR AO MÍNIMO (${tot(b)} PARES) — REVISAR</div>`:'';
+    const areaU=b.alerta?AREA-6:AREA;
     const nL=Math.max(LIN_FIXAS,b.rows.length), h=+(areaU/nL).toFixed(2);
     let tr='';
     for(let k=0;k<nL;k++){
@@ -1137,294 +1214,174 @@ function render(){
         <tr><th>CÓDIGO</th><th>QUANT</th></tr>${tr}</table>
       <div class="ft"><span>TOTAL: ${tot(b)} PARES</span><span>DESTINO - SP</span></div>
     </div>`;
-  }).join(''):'<div style="padding:16px;color:var(--mut)">Importe uma planilha ou crie etiquetas manuais.</div>';
-
-  relatorio();
-  tabelaHold();
-  salvaTudo();
+  }).join(''):'<div style="padding:16px;color:var(--mut)">Importe uma planilha ou gere etiquetas manuais.</div>';
 }
 
-/* ---------- GRADE (SKU x TAMANHO) ---------- */
-function dadosGrade(){
-  const map=new Map(), sizes=new Set();
+/* ================= RELATÓRIOS ================= */
+function porCodigo(){
+  const m=new Map();
+  todas().forEach(b=>b.rows.forEach(x=>m.set(x.cod,(m.get(x.cod)||0)+x.qty)));
+  return [...m].sort((a,b)=>a[0].localeCompare(b[0],'pt',{numeric:true}));
+}
+function porRef(){
+  const m=new Map();
   todas().forEach(b=>b.rows.forEach(x=>{
-    const m=x.cod.match(/^(.*)-(\d+)$/);
-    const ref=m?m[1]:x.cod, sz=m?m[2]:'—';
-    sizes.add(sz);
-    if(!map.has(ref))map.set(ref,{});
-    const o=map.get(ref); o[sz]=(o[sz]||0)+x.qty;
+    const r=x.cod.replace(/-\d+$/,'');
+    m.set(r,(m.get(r)||0)+x.qty);
   }));
-  const cols=[...sizes].sort((a,b)=>(+a||999)-(+b||999)||String(a).localeCompare(b));
-  const refs=[...map.keys()].sort((a,b)=>a.localeCompare(b,'pt',{numeric:true}));
-  return {map,cols,refs};
+  return [...m].sort((a,b)=>a[0].localeCompare(b[0],'pt',{numeric:true}));
 }
+function matrizGrade(){
+  const refs=new Map(), sizes=new Set();
+  todas().forEach(b=>b.rows.forEach(x=>{
+    const m=x.cod.match(/^(.*?)-(\d{1,2})$/);
+    const r=m?m[1]:x.cod, s=m?m[2]:'—';
+    sizes.add(s);
+    if(!refs.has(r))refs.set(r,new Map());
+    const lin=refs.get(r);
+    lin.set(s,(lin.get(s)||0)+x.qty);
+  }));
+  const cols=[...sizes].sort((a,b)=>(+a||0)-(+b||0));
+  const linhas=[...refs].sort((a,b)=>a[0].localeCompare(b[0],'pt',{numeric:true}));
+  return {cols,linhas};
+}
+
+function relatorio(){
+  if(!$('#kpis'))return;
+  const bx=todas(), pares=bx.reduce((s,b)=>s+tot(b),0);
+  const cods=porCodigo(), refs=porRef(), al=bx.filter(b=>b.alerta).length;
+  const hold=retidos.reduce((s,l)=>s+l.qty,0);
+
+  $('#kpis').innerHTML=[
+    ['Etiquetas',bx.length],['Pares',pares],['Referências',refs.length],
+    ['Códigos',cods.length],['Alertas',al],['Retidos (pares)',hold]
+  ].map(([t,v])=>`<div class="kpi"><b>${v}</b><small>${t}</small></div>`).join('');
+
+  $('#holdAviso').innerHTML=hold
+    ? `🚫 ${retidos.length} item(ns) retidos (${hold} pares) estão <b>fora</b> destes números e dos CSVs.`
+    : 'Nenhum item retido — os números abaixo cobrem todo o lote.';
+
+  $('#lista').innerHTML=bx.length
+    ? `<table><tr><th style="width:90px">Caixa</th><th>Códigos</th><th class="n" style="width:110px">Pares</th></tr>`
+      +bx.map((b,i)=>`<tr${b.alerta?' style="background:#fffbeb"':''}>
+        <td><b>${String(i+1).padStart(2,'0')}</b> ${b.alerta?'<span class="tag" style="background:var(--wr)">baixo</span>':''}</td>
+        <td>${b.rows.map(x=>esc(x.cod)+' <b>'+x.qty+'</b>').join(' · ')}</td>
+        <td class="n"><b>${tot(b)}</b></td></tr>`).join('')
+      +`<tr class="tot"><td colspan="2"><b>TOTAL</b></td><td class="n"><b>${pares}</b></td></tr></table>`
+    : '<div style="padding:14px;color:var(--mut)">Nada a exibir.</div>';
+
+  $('#relCod').innerHTML=cods.length
+    ? `<table><tr><th>Código</th><th class="n">Pares</th></tr>`
+      +cods.map(([c,q])=>`<tr><td>${esc(c)}</td><td class="n">${q}</td></tr>`).join('')
+      +`<tr class="tot"><td><b>TOTAL</b></td><td class="n"><b>${pares}</b></td></tr></table>`
+    : '<div style="padding:14px;color:var(--mut)">Nada a exibir.</div>';
+
+  $('#relRef').innerHTML=refs.length
+    ? `<table><tr><th>Referência</th><th class="n">Pares</th></tr>`
+      +refs.map(([c,q])=>`<tr><td>${esc(c)}</td><td class="n">${q}</td></tr>`).join('')
+      +`<tr class="tot"><td><b>TOTAL</b></td><td class="n"><b>${pares}</b></td></tr></table>`
+    : '<div style="padding:14px;color:var(--mut)">Nada a exibir.</div>';
+
+  grade();
+}
+
 function grade(){
   const el=$('#relGrade'); if(!el)return;
-  const zeros=$('#gZero')&&$('#gZero').checked;
-  const f=norm($('#filtro')?$('#filtro').value||'':'');
-  const {map,cols,refs}=dadosGrade();
-  const vis=refs.filter(r=>!f||norm(r).includes(f));
-  if(!vis.length||!cols.length){
-    el.innerHTML='<div style="padding:14px;color:var(--mut)">Sem dados para a grade.</div>';return;
-  }
-  const totCol={}; let geral=0, body='';
-  vis.forEach(r=>{
-    const o=map.get(r); let lt=0, tds='';
-    cols.forEach(c=>{
-      const q=o[c]||0; lt+=q; totCol[c]=(totCol[c]||0)+q;
-      tds+=q?`<td>${q}</td>`:`<td class="z">${zeros?0:''}</td>`;
-    });
-    geral+=lt;
-    body+=`<tr><td class="ref">${esc(r)}</td>${tds}<td class="tc">${lt}</td></tr>`;
-  });
-  el.innerHTML=`<table class="grd">
-    <tr><th style="text-align:left">Referência</th>${cols.map(c=>`<th>${esc(c)}</th>`).join('')}<th>Total</th></tr>
-    ${body}
-    <tr class="tt"><td style="text-align:left">TOTAL</td>${cols.map(c=>`<td>${totCol[c]||0}</td>`).join('')}<td>${geral}</td></tr>
-  </table>`;
+  const f=norm($('#filtro').value||''), zeros=$('#gZero').checked;
+  const {cols,linhas}=matrizGrade();
+  const vis=linhas.filter(([r])=>!f||norm(r).includes(f));
+  if(!vis.length){el.innerHTML='<div style="padding:14px;color:var(--mut)">Nada a exibir.</div>';return;}
+  const totCol=cols.map(s=>vis.reduce((t,[,m])=>t+(m.get(s)||0),0));
+  el.innerHTML=`<table class="grd"><tr><th>Referência</th>${cols.map(s=>`<th>${esc(s)}</th>`).join('')}<th>Total</th></tr>`
+    +vis.map(([r,m])=>{
+      const t=cols.reduce((s,c)=>s+(m.get(c)||0),0);
+      return `<tr><td class="ref">${esc(r)}</td>`
+        +cols.map(c=>{const v=m.get(c)||0;
+          return `<td class="${v?'':'z'}">${v||(zeros?0:'')}</td>`;}).join('')
+        +`<td class="tc">${t}</td></tr>`;
+    }).join('')
+    +`<tr class="tt"><td class="ref">TOTAL</td>${totCol.map(v=>`<td>${v}</td>`).join('')}
+      <td>${totCol.reduce((a,b)=>a+b,0)}</td></tr></table>`;
 }
-function exportaGrade(){
-  const {map,cols,refs}=dadosGrade();
-  if(!refs.length){alert('Sem dados na grade.');return;}
-  let csv='REFERENCIA;'+cols.join(';')+';TOTAL\n';
-  const totCol={}; let geral=0;
-  refs.forEach(r=>{
-    const o=map.get(r); let lt=0;
-    const cells=cols.map(c=>{const q=o[c]||0;lt+=q;totCol[c]=(totCol[c]||0)+q;return q||'';});
-    geral+=lt;
-    csv+=`${r};${cells.join(';')};${lt}\n`;
-  });
-  csv+=`TOTAL;${cols.map(c=>totCol[c]||0).join(';')};${geral}\n`;
+
+/* ================= EXPORTAÇÕES ================= */
+function baixa(csv,nome){
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));
-  a.download=`grade_${loteAtual()}.csv`;a.click();
-}
-async function exportaGradeJPG(){
-  const el=$('#relGrade');
-  if(!el||!el.querySelector('table')){alert('Sem dados na grade.');return;}
-
-  const css=`table.grd{border-collapse:collapse;font:12px Arial;width:auto}
-    table.grd th,table.grd td{border:1px solid #999;padding:5px 8px;text-align:center;white-space:nowrap;color:#111;background:#fff}
-    table.grd th{background:#eef3ff!important;position:static}
-    table.grd td.ref{text-align:left;font-weight:700;background:#fafafa!important}
-    table.grd td.z{color:#ddd}
-    table.grd tr.tt td{background:#f0f0f0!important;font-weight:800}
-    table.grd td.tc{font-weight:800;background:#f7f7f7!important}`;
-
-  const wrap=document.createElement('div');
-  wrap.id='gradeShot';
-  wrap.style.cssText='position:absolute;left:-99999px;top:0;display:block;'+
-                     'width:max-content;background:#fff;padding:18px;font:13px Arial;'+
-                     'opacity:1;visibility:visible;z-index:0';
-  wrap.innerHTML=`<style>${css}</style>
-    <div style="font:800 17px Arial;margin-bottom:10px;color:#111">
-      ENVIO — #${esc(loteAtual())} — ${new Date().toLocaleDateString('pt-BR')}
-    </div>${el.innerHTML}`;
-  document.body.appendChild(wrap);
-
-  try{
-    if(document.fonts&&document.fonts.ready) await document.fonts.ready;
-    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
-
-    const w=Math.ceil(wrap.scrollWidth), h=Math.ceil(wrap.scrollHeight);
-    if(!w||!h) throw new Error('dimensões inválidas ('+w+'×'+h+')');
-
-    const canvas=await html2canvas(wrap,{
-      scale:2, backgroundColor:'#ffffff',
-      width:w, height:h,
-      windowWidth:w+64, windowHeight:h+64,
-      scrollX:0, scrollY:0, useCORS:true, logging:false,
-      onclone:(doc)=>{
-        const c=doc.getElementById('gradeShot');
-        if(c){
-          c.style.position='static';
-          c.style.left='0';
-          c.style.opacity='1';
-          c.style.visibility='visible';
-          c.style.transform='none';
-        }
-      }
-    });
-
-    const blob=await new Promise(r=>canvas.toBlob(r,'image/jpeg',0.95));
-    if(!blob||blob.size<1024) throw new Error('imagem vazia');
-
-    const url=URL.createObjectURL(blob), a=document.createElement('a');
-    a.href=url;
-    a.download=`grade_${loteAtual()}_${new Date().toISOString().slice(0,10)}.jpg`;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),4000);
-  }catch(err){
-    alert('Falha ao gerar JPEG: '+err.message);
-  }finally{
-    wrap.remove();
-  }
-}
-
-/* ---------- relatório (ignora totalmente os retidos) ---------- */
-function dados(){
-  const porCod=new Map(), porRef=new Map();
-  todas().forEach(b=>b.rows.forEach(x=>{
-    const c=porCod.get(x.cod)||{qty:0,cx:new Set()};
-    c.qty+=x.qty; c.cx.add(b); porCod.set(x.cod,c);
-    const ref=x.cod.replace(/-\d+$/,'');
-    const r=porRef.get(ref)||{qty:0,itens:0};
-    r.qty+=x.qty; r.itens++; porRef.set(ref,r);
-  }));
-  return {porCod,porRef};
-}
-function relatorio(){
-  grade();
-  const bx=todas(), n=bx.length, {porCod,porRef}=dados();
-  const f=norm($('#filtro').value||'');
-  const pares=[...porCod].reduce((s,[,v])=>s+v.qty,0);
-
-  $('#kpis').innerHTML=`
-    <div class="kpi"><small>Etiquetas</small><b>${n}</b></div>
-    <div class="kpi"><small>Total de pares</small><b>${pares}</b></div>
-    <div class="kpi"><small>Códigos distintos</small><b>${porCod.size}</b></div>
-    <div class="kpi"><small>Referências</small><b>${porRef.size}</b></div>
-    <div class="kpi"><small>Abaixo do mínimo</small><b>${bx.filter(b=>b.alerta).length}</b></div>
-    <div class="kpi"><small>Média pares/etiqueta</small><b>${n?(pares/n).toFixed(1):0}</b></div>`;
-
-  $('#holdAviso').innerHTML=retidos.length
-    ? `🚫 <b>${retidos.length}</b> produto(s) (<b>${retidos.reduce((s,l)=>s+l.qty,0)}</b> pares) estão marcados como
-       “não vai hoje” e <b>não</b> constam em nenhum número acima nem nos arquivos exportados.
-       <a href="#" onclick="aba('edi');return false">gerenciar</a>`
-    : '';
-
-  const vis=bx.map((b,i)=>({b,i})).filter(({b})=>!f||b.rows.some(x=>x.cod.includes(f)));
-  $('#lista').innerHTML=vis.length?`<table><tr><th>#</th><th>Origem</th><th>Itens</th><th class="n">Pares</th><th></th></tr>`+
-    vis.map(({b,i})=>`<tr><td>${i+1}</td>
-      <td><span class="tag ${b.manual?'t-m':'t-x'}">${b.manual?'manual':'planilha'}</span>${b.alerta?` <a href="#" onclick="vaiEtq(${i});return false" title="ir para a etiqueta">⚠</a>`:''}</td>
-      <td>${b.rows.map(x=>`${esc(x.cod)} ×${x.qty}`).join(' · ')}</td>
-      <td class="n"><b>${tot(b)}</b></td>
-      <td><button onclick="delEt(${i})">🗑</button></td></tr>`).join('')+`</table>`
-    :'<div style="padding:14px;color:var(--mut)">Nenhuma etiqueta.</div>';
-
-  const cods=[...porCod].filter(([c])=>!f||c.includes(f))
-    .sort((a,b)=>a[0].localeCompare(b[0],'pt',{numeric:true}));
-  $('#relCod').innerHTML=cods.length?
-    `<table><tr><th>Código</th><th class="n">Pares</th><th class="n">Etiquetas</th><th class="n">% total</th></tr>`+
-    cods.map(([c,v])=>`<tr><td>${esc(c)}</td><td class="n"><b>${v.qty}</b></td>
-      <td class="n">${v.cx.size}</td><td class="n">${(v.qty/pares*100).toFixed(1)}%</td></tr>`).join('')+
-    `<tr class="tot" style="background:#f7f9fc;font-weight:800"><td>TOTAL</td><td class="n">${cods.reduce((s,[,v])=>s+v.qty,0)}</td><td></td><td></td></tr></table>`
-    :'<div style="padding:14px;color:var(--mut)">Sem dados.</div>';
-
-  const refs=[...porRef].filter(([r])=>!f||r.includes(f)).sort((a,b)=>b[1].qty-a[1].qty);
-  $('#relRef').innerHTML=refs.length?
-    `<table><tr><th>Referência</th><th class="n">Tamanhos</th><th class="n">Pares</th></tr>`+
-    refs.map(([r,v])=>`<tr><td>${esc(r)}</td><td class="n">${v.itens}</td><td class="n"><b>${v.qty}</b></td></tr>`).join('')+`</table>`
-    :'<div style="padding:14px;color:var(--mut)">Sem dados.</div>';
-}
-function exportaCSV(){
-  const lote=loteAtual();
-  let csv='LOTE;CAIXA;SKU;QUANTIDADE\n';
-  todas().forEach((b,i)=>b.rows.forEach(x=>csv+=`${lote};${i+1};${x.cod};${x.qty}\n`));
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));
-  a.download=`relatorio_${lote}.csv`;a.click();
+  a.download=nome;a.click();
 }
 function exportaEntrada(){
-  const {porCod}=dados();
-  if(!porCod.size){alert('Sem dados para exportar.');return;}
-
-  const linhas=[...porCod].sort((a,b)=>{
-    const ra=a[0].replace(/-\d+$/,''), rb=b[0].replace(/-\d+$/,'');
-    if(ra!==rb) return 0;
-    return (+(a[0].match(/-(\d+)$/)||[])[1]||0)-(+(b[0].match(/-(\d+)$/)||[])[1]||0);
+  const c=porCodigo();
+  if(!c.length){alert('Nada para exportar.');return;}
+  baixa('CODIGO;QUANTIDADE\n'+c.map(([k,v])=>`${k};${v}`).join('\n')+'\n',
+    'entrada-'+loteAtual()+'.csv');
+}
+function exportaCSV(){
+  const bx=todas();
+  if(!bx.length){alert('Nada para exportar.');return;}
+  let csv='LOTE;CAIXA;CODIGO;QUANTIDADE\n';
+  bx.forEach((b,i)=>b.rows.forEach(x=>{
+    csv+=`${loteAtual()};${String(i+1).padStart(2,'0')};${x.cod};${x.qty}\n`;
+  }));
+  baixa(csv,'detalhado-'+loteAtual()+'.csv');
+}
+function exportaGrade(){
+  const {cols,linhas}=matrizGrade();
+  if(!linhas.length){alert('Nada para exportar.');return;}
+  let csv='REFERENCIA;'+cols.join(';')+';TOTAL\n';
+  linhas.forEach(([r,m])=>{
+    const t=cols.reduce((s,c)=>s+(m.get(c)||0),0);
+    csv+=r+';'+cols.map(c=>m.get(c)||0).join(';')+';'+t+'\n';
   });
-
-  let csv='CODIGO;QUANT\r\n';
-  linhas.forEach(([cod,v])=>csv+=`${cod};${v.qty}\r\n`);
-  csv+=';';
-
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
-  a.download=`ENTREGA ${loteAtual()}.csv`;
-  document.body.appendChild(a); a.click(); a.remove();
+  baixa(csv,'grade-'+loteAtual()+'.csv');
+}
+function exportaGradeJPG(){
+  const el=$('#relGrade');
+  if(!el||!el.querySelector('table')){alert('Nada para exportar.');return;}
+  const prev=el.style.maxHeight, prevO=el.style.overflow;
+  el.style.maxHeight='none';el.style.overflow='visible';
+  html2canvas(el,{scale:2,backgroundColor:'#fff'}).then(cv=>{
+    el.style.maxHeight=prev;el.style.overflow=prevO;
+    const a=document.createElement('a');
+    a.href=cv.toDataURL('image/jpeg',0.95);
+    a.download='grade-'+loteAtual()+'.jpg';a.click();
+  }).catch(()=>{el.style.maxHeight=prev;el.style.overflow=prevO;});
 }
 function imprimirRel(){
-  const lote=loteAtual(), w=open('','','width=980,height=720');
-  w.document.write(`<title>Relatório ${lote}</title>
-  <style>body{font-family:Arial;margin:24px}h2{margin:0 0 4px}h3{margin:18px 0 6px;font-size:13px}
-  table{border-collapse:collapse;width:100%;font-size:11px}
-  th,td{border:1px solid #999;padding:4px 6px}th{background:#eee}.n{text-align:right}
-  table.grd td.ref{text-align:left;font-weight:700}
-  button,.tag{display:none}</style>
-  <h2>Relatório — #${lote}</h2>
-  <small>${new Date().toLocaleString('pt-BR')}</small>
-  ${retidos.length?`<p style="font-size:11px;color:#92400e">🚫 ${retidos.length} produto(s) retidos (“não vai hoje”) foram excluídos deste relatório.</p>`:''}
-  <h3>GRADE POR TAMANHO</h3>${$('#relGrade').innerHTML}
-  <h3>DETALHE POR ETIQUETA</h3>${$('#lista').innerHTML}
-  <h3>CONSOLIDADO POR CÓDIGO</h3>${$('#relCod').innerHTML}
-  <h3>AGRUPADO POR REFERÊNCIA</h3>${$('#relRef').innerHTML}`);
-  w.document.close();
-  w.focus();
-  setTimeout(()=>w.print(),300);
+  const w=window.open('','_blank');
+  const {cols,linhas}=matrizGrade();
+  const pares=todas().reduce((s,b)=>s+tot(b),0);
+  w.document.write(`<html><head><meta charset="utf-8"><title>Relatório ${loteAtual()}</title>
+    <style>body{font:12px Arial;padding:16px}h1{font-size:16px}
+    table{border-collapse:collapse;width:100%;margin-bottom:18px}
+    th,td{border:1px solid #999;padding:4px 6px;text-align:center}
+    th:first-child,td:first-child{text-align:left}</style></head><body>
+    <h1>Relatório do lote ${loteAtual()} — ${pares} pares</h1>
+    <table><tr><th>Referência</th>${cols.map(s=>`<th>${s}</th>`).join('')}<th>Total</th></tr>
+    ${linhas.map(([r,m])=>`<tr><td>${r}</td>${cols.map(c=>`<td>${m.get(c)||0}</td>`).join('')}
+      <td><b>${cols.reduce((s,c)=>s+(m.get(c)||0),0)}</b></td></tr>`).join('')}</table>
+    <table><tr><th>Código</th><th>Pares</th></tr>
+    ${porCodigo().map(([c,q])=>`<tr><td>${c}</td><td>${q}</td></tr>`).join('')}</table>
+    </body></html>`);
+  w.document.close();w.focus();w.print();
 }
 
-/* ---------- INICIALIZAÇÃO ---------- */
-(async function init(){
-  await baixaNuvem();                 // traz o estado da nuvem para o localStorage
-
-  try{
-    subs    = { ...BASE, ...JSON.parse(localStorage.getItem('etq_subs') || '{}') };
-    manuais = JSON.parse(localStorage.getItem('etq_man2') || '[]');
-    retidos = JSON.parse(localStorage.getItem(K_HOLD) || '[]');
-    buffer  = JSON.parse(localStorage.getItem(K_BUF)  || '[]');
-
-    const r = localStorage.getItem(K_RAW);
-    if(r){ rawRows = JSON.parse(r); planilha = boxes(rawRows, CAP_MIN, CAP_MAX); }
-
-    $('#lote').value = localStorage.getItem(K_LOTE) || '';
-  }catch(e){ console.warn('Falha ao restaurar estado:', e); }
-
-  showBuf();
-  render();
-  renderSubs();
-  tabelaEdit();
-})();
-
-SB.channel('estado')
+/* ================= REALTIME + BOOT ================= */
+SB.channel('app_state_'+DOC_ID)
   .on('postgres_changes',
-      { event: 'UPDATE', schema: 'public', table: 'app_state', filter: `id=eq.${DOC_ID}` },
-      async payload => {
-        const hash = JSON.stringify(payload.new?.data || {});
-        if (hash === ultimoEnvio) return;   // é o eco do meu próprio envio
-        ultimoEnvio = hash;
-
-        if (document.hasFocus()) {          // estou digitando: só avisa
-          const el = document.querySelector('#info');
-          if (el) el.innerHTML = '🔄 Há dados novos de outro dispositivo — '
-            + '<a href="#" onclick="aplicaRemoto();return false">atualizar</a>';
-          return;
-        }
-        aplicaRemoto(payload.new.data);
+      {event:'*',schema:'public',table:'app_state',filter:'id=eq.'+DOC_ID},
+      p=>{
+        if(assina(p.new?.data)===ultimoEnvio)return;
+        baixaNuvem().then(m=>{ if(m)recarregaEstado(); });
       })
   .subscribe();
 
-  async function aplicaRemoto(dados){
-  if (!dados) { if (!await baixaNuvem()) return; }
-  else {
-    sincronizando = true;
-    CHAVES.forEach(k => { if (dados[k] !== undefined) localStorage.setItem(k, dados[k]); });
-    sincronizando = false;
-  }
-
-  // recarrega o estado em memória — mesmo que restauraBackup faz
-  manuais = JSON.parse(localStorage.getItem('etq_man2') || '[]');
-  buffer  = JSON.parse(localStorage.getItem(K_BUF)  || '[]');
-  retidos = JSON.parse(localStorage.getItem(K_HOLD) || '[]');
-  rawRows = JSON.parse(localStorage.getItem(K_RAW)  || 'null');
-  subs    = { ...BASE, ...JSON.parse(localStorage.getItem('etq_subs') || '{}') };
-  $('#lote').value = localStorage.getItem(K_LOTE) || '';
-  planilha = rawRows ? boxes(rawRows, CAP_MIN, CAP_MAX) : [];
-
-  showBuf(); render(); renderSubs(); tabelaEdit();
-  $('#info').textContent = '☁ Atualizado ' + new Date().toLocaleTimeString('pt-BR');
-}
-
+baixaNuvem()
+  .catch(()=>false)
+  .finally(()=>{
+    recarregaEstado();
+    prontoParaEnviar=true;      /* só agora o app pode gravar/enviar */
+    snapshot();                 /* marco zero do dia */
+  });
 </script>
-</body>
 </html>
