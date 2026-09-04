@@ -619,6 +619,15 @@ function montaCod(sku,tam){
   if(!cod){naoMapeados.add(base);cod=base;}
   return cod+(sz?'-'+sz:'');
 }
+ function checaMapas(){
+  naoMapeados.clear();
+  const valores=new Set(Object.values(subs));
+  caixas().forEach(b=>b.rows.forEach(x=>{
+    const ref=x.cod.replace(/-\d+$/,'');
+    if(!subs[ref]&&!valores.has(ref)) naoMapeados.add(ref);
+  }));
+}
+ 
 
 /* ================= ESTADO ================= */
 let rawRows=null, planilha=[], buffer=[], manuais=[], retidos=[];
@@ -850,12 +859,11 @@ function renderSubs(){
 function preenche(k){aba('sub');$('#sDe').value=k;$('#sPara').focus();}
 
 function reprocessa(){
-  naoMapeados.clear();
-  if(rawRows)planilha=boxes(rawRows,CAP_MIN,CAP_MAX);
   manuais.forEach(b=>b.rows.forEach(x=>{x.cod=montaCod(x.cod);}));
+  checaMapas();
   salva();render();renderSubs();
 }
-
+  
 /* ================= ZERAR ================= */
 function zerarTudo(){
   const n=planilha.length+manuais.length+buffer.length;
@@ -988,14 +996,42 @@ function delEt(i){
 }
 
 /* ================= PLANILHA ================= */
+$('#f').setAttribute('multiple','');   // permite selecionar vários de uma vez
+
 $('#f').addEventListener('change',async e=>{
-  if(!e.target.files[0])return;
+  const files=[...e.target.files];
+  if(!files.length)return;
   snapshot();
-  const wb=XLSX.read(await e.target.files[0].arrayBuffer(),{type:'array'});
-  rawRows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:null});
-  manuais=manuais.filter(b=>b.manual);
-  reprocessa();tabelaEdit();
+
+  materializa();                        /* congela as caixas já existentes */
+  let novas=0, pares=0;
+
+  for(const file of files){
+    /* dentro do loop de arquivos, antes de processar */
+if(manuais.some(b=>b.origem===file.name)
+   && !confirm(`“${file.name}” já foi importado. Importar de novo e somar?`)) continue;
+    const wb=XLSX.read(await file.arrayBuffer(),{type:'array'});
+    for(const nome of wb.SheetNames){
+      const rows=XLSX.utils.sheet_to_json(wb.Sheets[nome],{header:1,defval:null});
+      const bx=boxes(rows,CAP_MIN,CAP_MAX);
+      bx.forEach(b=>{
+        manuais.push({id:uid(),manual:false,sku:b.sku,alerta:!!b.alerta,
+                      origem:file.name,rows:b.rows});
+        novas++; pares+=tot(b);
+      });
+    }
+  }
+
+  rawRows=null;
+  sincronizando=true;_rem(K_RAW);sincronizando=false;
+
+  e.target.value='';                    /* permite reimportar o mesmo arquivo */
+  checaMapas();
+  commit(novas
+    ? `+${novas} caixa(s) e ${pares} pares importados de ${files.length} arquivo(s).`
+    : 'Nenhuma linha reconhecida na planilha.');
 });
+
 function isHeader(r){
   const idx=[];
   for(let i=1;i<r.length;i++){const n=num(r[i]);if(n!=null&&n>=15&&n<=50)idx.push([i,n]);}
@@ -1040,9 +1076,9 @@ function boxes(rows,capMin,capMax){
 /* PATCH extra: idempotente — chamadas em cascata não duplicam mais */
 function materializa(){
   if(!planilha.length)return;
-  const novos=planilha.map(b=>({id:b.id||uid(),manual:false,sku:b.sku,alerta:!!b.alerta,
-    rows:b.rows.map(x=>({cod:x.cod,qty:x.qty}))}));
   const jaTem=new Set(manuais.map(b=>b.id));
+  const novos=planilha.map(b=>({id:b.id||uid(),manual:false,sku:b.sku,
+    alerta:!!b.alerta,rows:b.rows.map(x=>({cod:x.cod,qty:x.qty}))}));
   manuais=[...novos.filter(b=>!jaTem.has(b.id)),...manuais];
   planilha=[];rawRows=null;
   sincronizando=true;_rem(K_RAW);sincronizando=false;
