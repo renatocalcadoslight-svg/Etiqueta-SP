@@ -217,6 +217,7 @@ table.grd td.tc{font-weight:800;background:#f7f9fc}
       <label>Lote <input id="lote" size="12" placeholder="280826-SP" oninput="salvaLote()"></label>
       <button class="pri" onclick="print()">🖨 Imprimir</button>
       <button onclick="listaBackups()">↩ Restaurar backup</button>
+      <button onclick="auditoria()">🔍 Auditar duplicatas</button>
       <button class="dng" onclick="zerarTudo()">🧹 Zerar tudo</button>
       <span id="info" class="hint" style="margin:0"></span>
     </div>
@@ -290,6 +291,7 @@ table.grd td.tc{font-weight:800;background:#f7f9fc}
     <input id="eFiltro" size="26" placeholder="🔎 filtrar SKU..." oninput="tabelaEdit()">
     <button onclick="reordenar()">↕ Reordenar por caixa/SKU</button>
     <button class="pri" onclick="redistribui20()">📦 Redistribuir em caixas de 20</button>
+    <button onclick="mesclaIguais()">🔗 Mesclar caixas idênticas</button>
     <button class="dng" onclick="zerarTudo()">🧹 Zerar tudo</button>
     <span id="eInfo" class="ok"></span>
   </div>
@@ -389,12 +391,14 @@ table.grd td.tc{font-weight:800;background:#f7f9fc}
 </div>
 
 <script>
-/* ================= CHAVES (antes de tudo: o sync as referencia) ================= */
+/* ================= CHAVES ================= */
 const K_MAN='etq_man2', K_RAW='etq_raw', K_LOTE='etq_lote',
-      K_BUF='etq_buf', K_HOLD='etq_hold', K_SUBS='etq_subs', K_HIST='etq_hist';
+      K_BUF='etq_buf', K_HOLD='etq_hold', K_SUBS='etq_subs',
+      K_HIST='etq_hist', K_REV='etq_rev';
 const CHAVES=[K_MAN,K_RAW,K_BUF,K_HOLD,K_SUBS,K_LOTE];
 
 const $=s=>document.querySelector(s);
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 
 /* ================= SUPABASE ================= */
 const SB = supabase.createClient(
@@ -403,15 +407,14 @@ const SB = supabase.createClient(
 );
 const DOC_ID='etiquetas-sp';
 
-/* interceptador PRIMEIRO: baixaNuvem usa _set/_rem e não realimenta o envio */
 const _set=localStorage.setItem.bind(localStorage);
 const _rem=localStorage.removeItem.bind(localStorage);
 localStorage.setItem=(k,v)=>{ _set(k,v); if(!sincronizando&&CHAVES.includes(k))enviaNuvem(); };
 localStorage.removeItem=k=>{ _rem(k);   if(!sincronizando&&CHAVES.includes(k))enviaNuvem(); };
 
 let sincronizando=false, filaSync=null, ultimoEnvio='';
-let prontoParaEnviar=false;      /* PATCH 1: trava de boot */
-let zeragemIntencional=false;    /* PATCH 2: só zerarTudo libera envio vazio */
+let prontoParaEnviar=false, zeragemIntencional=false;
+let revLocal=+(localStorage.getItem(K_REV)||0);   /* PATCH C: controle de versão */
 
 const assina=o=>JSON.stringify(CHAVES.map(k=>o?.[k]??null));
 
@@ -420,7 +423,6 @@ function avisoSync(msg){
   el.innerHTML=msg||''; el.style.display=msg?'block':'none';
 }
 
-/* PATCH 3: retidos nunca são apagados por ausência remota — e são unidos, não substituídos */
 function mesclaHold(remoto){
   let local=[], rem=[];
   try{ local=JSON.parse(localStorage.getItem(K_HOLD)||'[]'); }catch(e){}
@@ -437,16 +439,18 @@ function mesclaHold(remoto){
 async function baixaNuvem(){
   const {data,error}=await SB.from('app_state').select('data').eq('id',DOC_ID).maybeSingle();
   if(error||!data?.data)return false;
+
+  const revRemota=+(data.data._rev||0);
+  if(revRemota<revLocal)return false;            /* remoto atrasado: ignora */
+  revLocal=revRemota; _set(K_REV,revLocal);
+
   const hash=assina(data.data);
   if(hash===ultimoEnvio)return false;
   ultimoEnvio=hash;
   sincronizando=true;
   CHAVES.forEach(k=>{
     const v=data.data[k];
-    if(k===K_HOLD){                     /* append-only */
-      if(v!==null&&v!==undefined) mesclaHold(v);
-      return;                           /* ausência remota NUNCA apaga retidos */
-    }
+    if(k===K_HOLD){ if(v!==null&&v!==undefined)mesclaHold(v); return; }
     if(v===null||v===undefined) _rem(k);
     else _set(k,v);
   });
@@ -462,29 +466,41 @@ function payloadVazio(p){
 }
 
 function enviaNuvem(){
-  if(!prontoParaEnviar)return;          /* PATCH 1 */
+  if(!prontoParaEnviar)return;
   clearTimeout(filaSync);
   filaSync=setTimeout(async()=>{
     const payload={};
     CHAVES.forEach(k=>{ payload[k]=localStorage.getItem(k); });
 
-    if(payloadVazio(payload)&&!zeragemIntencional){   /* PATCH 2 */
+    if(payloadVazio(payload)&&!zeragemIntencional){
       ultimoEnvio='';
       $('#info').textContent='⚠ Envio vazio bloqueado (proteção)';
       avisoSync('🛡 Um envio com <b>estado totalmente vazio</b> foi bloqueado. '
-        +'Nada foi apagado na nuvem. Se você realmente quer limpar, use <b>🧹 Zerar tudo</b>.');
+        +'Nada foi apagado na nuvem. Para limpar de verdade use <b>🧹 Zerar tudo</b>.');
       return;
     }
     zeragemIntencional=false;
 
     const hash=assina(payload);
     if(hash===ultimoEnvio)return;
+
+    /* PATCH C: não sobrescrever quem publicou depois de mim */
+    const {data:atual}=await SB.from('app_state').select('data').eq('id',DOC_ID).maybeSingle();
+    const revNuvem=+(atual?.data?._rev||0);
+    if(revNuvem>revLocal){
+      await baixaNuvem(); recarregaEstado();
+      avisoSync('🔄 Outro aparelho salvou primeiro — estado recarregado. '
+        +'Confira e refaça a última edição, se necessário.');
+      return;
+    }
+    revLocal=revNuvem+1; _set(K_REV,revLocal);
+    payload._rev=revLocal;
     ultimoEnvio=hash;
 
     const {error}=await SB.from('app_state')
       .upsert({id:DOC_ID,data:payload,updated_at:new Date()});
     $('#info').textContent=error?'⚠ Falha ao sincronizar'
-      :'☁ Sincronizado '+new Date().toLocaleTimeString('pt-BR');
+      :'☁ Sincronizado '+new Date().toLocaleTimeString('pt-BR')+' (v'+revLocal+')';
     if(!error)avisoSync('');
   },1500);
 }
@@ -501,6 +517,7 @@ const num=v=>typeof v==='number'?v:(v!=null&&v!==''&&!isNaN(v)?+v:null);
 const norm=s=>String(s).toUpperCase().replace(/\s+/g,' ').trim();
 const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
 const tot=b=>b.rows.reduce((s,x)=>s+x.qty,0);
+const sigConteudo=b=>b.rows.map(x=>x.cod+':'+x.qty).sort().join(',');
 
 /* ================= SUBSTITUIÇÕES PADRÃO ================= */
 const SUBS_PADRAO = {
@@ -577,7 +594,8 @@ const SUBS_PADRAO = {
   "PATRULHA FEMININA":"PCF"
 };
 const BASE=Object.fromEntries(Object.entries(SUBS_PADRAO).map(([k,v])=>[norm(k),norm(v)]));
-let subs={...BASE, ...JSON.parse(localStorage.getItem(K_SUBS)||'{}')};
+let subs={...BASE};
+try{ subs={...BASE, ...JSON.parse(localStorage.getItem(K_SUBS)||'{}')}; }catch(e){}
 const salvaSubs=()=>localStorage.setItem(K_SUBS,JSON.stringify(subs));
 const naoMapeados=new Set();
 
@@ -606,9 +624,7 @@ function montaCod(sku,tam){
 let rawRows=null, planilha=[], buffer=[], manuais=[], retidos=[];
 
 function salvaTudo(){
-  if(!prontoParaEnviar){          /* nunca grava estado-fantasma antes do boot */
-    return;
-  }
+  if(!prontoParaEnviar)return;
   try{
     localStorage.setItem(K_MAN,JSON.stringify(manuais));
     localStorage.setItem(K_BUF,JSON.stringify(buffer));
@@ -624,7 +640,6 @@ function salvaTudo(){
 const salva=()=>salvaTudo();
 function salvaLote(){ if(prontoParaEnviar)localStorage.setItem(K_LOTE,$('#lote').value||''); render(); }
 
-/* PATCH 4: backup local robusto (grava com _set — nunca sincroniza) */
 function snapshot(){
   if(!prontoParaEnviar)return;
   try{
@@ -642,7 +657,8 @@ setInterval(snapshot,60000);
 window.addEventListener('beforeunload',snapshot);
 
 function listaBackups(){
-  const h=JSON.parse(localStorage.getItem(K_HIST)||'[]');
+  let h=[];
+  try{ h=JSON.parse(localStorage.getItem(K_HIST)||'[]'); }catch(e){}
   if(!h.length){alert('Nenhum backup disponível ainda (o primeiro é criado após 1 minuto de uso).');return;}
   const menu=h.map((b,i)=>`${i} — ${new Date(b.t).toLocaleString('pt-BR')} · `
     +`${(b.man||[]).length} caixa(s) · ${(b.hold||[]).length} retido(s)`).join('\n');
@@ -653,24 +669,63 @@ function listaBackups(){
   restauraBackup(i);
 }
 function restauraBackup(i=0){
-  const h=(JSON.parse(localStorage.getItem(K_HIST)||'[]'))[i];
+  let h=null;
+  try{ h=(JSON.parse(localStorage.getItem(K_HIST)||'[]'))[i]; }catch(e){}
   if(!h){alert('Backup não encontrado.');return;}
   if(!confirm('Restaurar o backup de '+new Date(h.t).toLocaleString('pt-BR')+'?\nO estado atual será substituído.'))return;
-  manuais=h.man||[]; rawRows=h.raw||null; buffer=h.buf||[]; retidos=h.hold||retidos;
+  manuais=dedupCaixas(h.man||[]); rawRows=h.raw||null; buffer=h.buf||[]; retidos=h.hold||retidos;
   planilha=rawRows?boxes(rawRows,CAP_MIN,CAP_MAX):[];
   $('#lote').value=h.lote||'';
   salvaTudo(); showBuf(); render(); renderSubs(); tabelaEdit();
   avisoSync('');
 }
 
+/* ===== PATCH A: dedup por ID (não por conteúdo, não por flag) ===== */
 function dedupCaixas(arr){
-  const vistas=new Set();
-  return arr.filter(b=>{
-    const sig=(b.sku||'')+'|'+(b.manual?'M':'P')+'|'
-      +b.rows.map(x=>x.cod+':'+x.qty).sort().join(',');
-    if(vistas.has(sig))return false;
-    vistas.add(sig);return true;
+  const vistas=new Set(), out=[];
+  (arr||[]).forEach(b=>{
+    if(!b||!Array.isArray(b.rows)||!b.rows.length)return;
+    if(!b.id)b.id=uid();                    /* migra caixas antigas */
+    if(vistas.has(b.id))return;
+    vistas.add(b.id);
+    out.push(b);
   });
+  return out;
+}
+
+/* ===== PATCH B: limpeza de duplicatas legadas, ignorando o flag manual ===== */
+function limpezaLegado(){
+  const vistas=new Map();
+  manuais.forEach(b=>{
+    const k=sigConteudo(b);
+    if(!k)return;
+    if(!vistas.has(k))vistas.set(k,b);
+  });
+  const antes=manuais.length;
+  manuais=[...vistas.values()];
+  return antes-manuais.length;
+}
+
+function mesclaIguais(){
+  const n=limpezaLegado();
+  if(!n){alert('Nenhuma caixa idêntica encontrada.');return;}
+  snapshot();
+  commit(n+' caixa(s) duplicada(s) removida(s).');
+}
+
+function auditoria(){
+  const c=new Map();
+  manuais.forEach(b=>{const k=sigConteudo(b); c.set(k,(c.get(k)||0)+1);});
+  const dup=[...c].filter(([,n])=>n>1);
+  const semId=manuais.filter(b=>!b.id).length;
+  const flags=manuais.filter(b=>b.manual===false).length;
+  alert('Auditoria do estado atual\n\n'
+    +'Caixas: '+manuais.length+'\n'
+    +'Conteúdos duplicados: '+dup.length+'\n'
+    +'Caixas sem id: '+semId+'\n'
+    +'Flag planilha / manual: '+flags+' / '+(manuais.length-flags)+'\n'
+    +'Revisão de sync: v'+revLocal
+    +(dup.length?'\n\nUse “🔗 Mesclar caixas idênticas” na aba Editar.':'\n\n✔ Sem duplicatas.'));
 }
 
 function recarregaEstado(){
@@ -689,8 +744,17 @@ function recarregaEstado(){
 
   naoMapeados.clear();
   planilha=rawRows?boxes(rawRows,CAP_MIN,CAP_MAX):[];
-  manuais =dedupCaixas(manuais.filter(b=>b&&Array.isArray(b.rows)&&b.rows.length));
-  retidos =retidos.filter(l=>l&&l.cod&&+l.qty>0);
+
+  const antes=manuais.length;
+  manuais=dedupCaixas(manuais);
+  const removidas=limpezaLegado();
+  retidos=retidos.filter(l=>l&&l.cod&&+l.qty>0);
+
+  /* ⬅ o que faltava: persistir a limpeza no localStorage E na nuvem */
+  if(manuais.length!==antes){
+    salvaTudo();
+    if(removidas)$('#info').textContent=removidas+' caixa(s) duplicada(s) removida(s).';
+  }
 
   $('#lote').value=localStorage.getItem(K_LOTE)||'';
   pintaBuf(); render(); renderSubs(); tabelaEdit();
@@ -798,8 +862,8 @@ function zerarTudo(){
   if(!n){alert('Não há nada para zerar.');return;}
   if(!confirm(`Apagar TODAS as etiquetas (${planilha.length} da planilha + ${manuais.length} manuais)?\n`
     +`As substituições e os ${retidos.length} item(ns) marcados como “não vai hoje” serão mantidos.`))return;
-  snapshot();                      /* backup antes de destruir */
-  zeragemIntencional=true;         /* PATCH 2: libera o envio, se ficar vazio */
+  snapshot();
+  zeragemIntencional=true;
   planilha=[];manuais=[];buffer=[];rawRows=null;naoMapeados.clear();
   [K_MAN,K_RAW,K_BUF].forEach(k=>localStorage.removeItem(k));
   $('#f').value='';$('#mRef').value='';$('#mTam').value='';$('#mQt').value='';$('#mBulk').value='';
@@ -830,7 +894,8 @@ function showBuf(){ pintaBuf(); salvaTudo(); }
 function fechaEtiqueta(){
   if($('#mRef').value.trim()&&+$('#mQt').value>0) addLinha();
   if(!buffer.length){$('#mMsg').textContent='Adicione pelo menos uma linha.';return;}
-  manuais.push({manual:true,rows:buffer});buffer=[];salva();showBuf();render();renderSubs();
+  manuais.push({id:uid(),manual:true,rows:buffer});
+  buffer=[];salva();showBuf();render();renderSubs();
 }
 function parseBulkRows(){
   const rows=[];
@@ -845,7 +910,9 @@ function parseBulkRows(){
 function importaBulk(umPorLinha){
   const rows=parseBulkRows();
   if(!rows.length){$('#mMsg').textContent='Nada reconhecido. Use: SKU TAMANHO QUANTIDADE';return;}
-  umPorLinha?rows.forEach(r=>manuais.push({manual:true,rows:[r]})):manuais.push({manual:true,rows});
+  umPorLinha
+    ? rows.forEach(r=>manuais.push({id:uid(),manual:true,rows:[r]}))
+    : manuais.push({id:uid(),manual:true,rows});
   $('#mBulk').value='';salva();render();renderSubs();
 }
 
@@ -870,14 +937,14 @@ function distribuiAuto(rows){
   porRef.forEach(fila=>{
     fila.sort((a,b)=>a.cod.localeCompare(b.cod,'pt',{numeric:true}));
     let rest=fila.reduce((s,x)=>s+x.qty,0);
-    while(rest>=CAP_MIN){ novas.push({manual:true,rows:puxa(fila,CAP_MIN)}); rest-=CAP_MIN; }
+    while(rest>=CAP_MIN){ novas.push({id:uid(),manual:true,rows:puxa(fila,CAP_MIN)}); rest-=CAP_MIN; }
     if(rest>0)sobras.push({fila,rest});
   });
   let cx=null;
   const atual=()=>cx?cx.rows.reduce((s,x)=>s+x.qty,0):CAP_MIN;
   sobras.forEach(s=>{
     while(s.rest>0){
-      if(atual()>=CAP_MIN){cx={manual:true,rows:[]};novas.push(cx);}
+      if(atual()>=CAP_MIN){cx={id:uid(),manual:true,rows:[]};novas.push(cx);}
       const take=Math.min(CAP_MIN-atual(),s.rest);
       cx.rows.push(...puxa(s.fila,take));
       s.rest-=take;
@@ -959,7 +1026,7 @@ function boxes(rows,capMin,capMax){
     const qLinha=its.reduce((s,x)=>s+x.qty,0);
     let b=(pend&&pend.sku===sku)?pend:null;
     if(b&&tot(b)<capMin&&qLinha>=capMin){ b.alerta=true; fecha(b); b=null; pend=null; }
-    if(!b){ if(pend)fecha(pend); b={sku,rows:[]}; }
+    if(!b){ if(pend)fecha(pend); b={id:uid(),sku,rows:[]}; }
     const cod=codigo(sku);
     b.rows.push(...its.sort((a,c)=>a.size-c.size).map(x=>({cod:`${cod}-${x.size}`,qty:x.qty})));
     if(tot(b)>=capMin){fecha(b);pend=null;}else pend=b;
@@ -970,13 +1037,16 @@ function boxes(rows,capMin,capMax){
 }
 
 /* ================= ABA EDITAR ================= */
+/* PATCH extra: idempotente — chamadas em cascata não duplicam mais */
 function materializa(){
-  if(!planilha.length&&!rawRows)return;
-  const novos=planilha.map(b=>({manual:false,sku:b.sku,alerta:!!b.alerta,
+  if(!planilha.length)return;
+  const novos=planilha.map(b=>({id:b.id||uid(),manual:false,sku:b.sku,alerta:!!b.alerta,
     rows:b.rows.map(x=>({cod:x.cod,qty:x.qty}))}));
-  manuais=dedupCaixas([...novos,...manuais]);
+  const jaTem=new Set(manuais.map(b=>b.id));
+  manuais=[...novos.filter(b=>!jaTem.has(b.id)),...manuais];
   planilha=[];rawRows=null;
   sincronizando=true;_rem(K_RAW);sincronizando=false;
+  manuais=dedupCaixas(manuais);
   salva();
 }
 function recalcAlertas(){
@@ -1006,7 +1076,7 @@ function unholdLinha(k){
   retidos.splice(k,1);
   materializa();
   if(l.cx>0&&manuais[l.cx-1]) manuais[l.cx-1].rows.push({cod:l.cod,qty:l.qty});
-  else manuais.push({manual:true,rows:[{cod:l.cod,qty:l.qty}]});
+  else manuais.push({id:uid(),manual:true,rows:[{cod:l.cod,qty:l.qty}]});
   commit('“'+l.cod+'” liberado e devolvido às caixas.');
 }
 function setHoldQty(k,v){
@@ -1023,7 +1093,7 @@ function limpaHold(){
   materializa();
   retidos.forEach(l=>{
     if(l.cx>0&&manuais[l.cx-1]) manuais[l.cx-1].rows.push({cod:l.cod,qty:l.qty});
-    else manuais.push({manual:true,rows:[{cod:l.cod,qty:l.qty}]});
+    else manuais.push({id:uid(),manual:true,rows:[{cod:l.cod,qty:l.qty}]});
   });
   retidos=[];
   commit('Todos os itens retidos foram liberados.');
@@ -1096,33 +1166,33 @@ function tabelaEdit(){
 function ref(i){materializa();return manuais[i];}
 function setQty(i,j,v){
   const q=+v; if(!(q>0)){commit('Quantidade inválida — nada alterado.');return;}
-  const b=ref(i); b.rows[j].qty=q; commit('Quantidade atualizada.');
+  const b=ref(i); if(!b)return; b.rows[j].qty=q; commit('Quantidade atualizada.');
 }
 function setCod(i,j,v){
   const t=v.trim(); if(!t){commit('SKU vazio — nada alterado.');return;}
   const cod=montaCod(t);
   if(!cod){commit('SKU inválido — nada alterado.');return;}
-  ref(i).rows[j].cod=cod;
+  const b=ref(i); if(!b)return; b.rows[j].cod=cod;
   commit('SKU atualizado.');
 }
 function setCaixa(i,j,v){
   let d=parseInt(v,10);
   if(!(d>0)){commit('Caixa inválida.');return;}
-  const b=ref(i);
+  const b=ref(i); if(!b)return;
   if(d===i+1){tabelaEdit();return;}
   const linha=b.rows.splice(j,1)[0];
-  if(d>manuais.length)manuais.push({manual:true,rows:[linha]});
+  if(d>manuais.length)manuais.push({id:uid(),manual:true,rows:[linha]});
   else manuais[d-1].rows.push(linha);
   commit(`Linha movida para a caixa ${Math.min(d,manuais.length)}.`);
 }
-function delLinha(i,j){const b=ref(i); b.rows.splice(j,1); commit('Linha removida.');}
+function delLinha(i,j){const b=ref(i); if(!b)return; b.rows.splice(j,1); commit('Linha removida.');}
 function delCaixa(i){
   if(!confirm('Excluir a caixa '+(i+1)+' e todas as suas linhas?'))return;
   snapshot(); materializa(); manuais.splice(i,1); commit('Caixa excluída.');
 }
 function novaCaixa(){
-  materializa(); manuais.push({manual:true,rows:[]});
-  salva(); $('#eCx').value=manuais.length;
+  materializa(); manuais.push({id:uid(),manual:true,rows:[]});
+  $('#eCx').value=manuais.length;
   $('#eInfo').textContent='Caixa '+manuais.length+' criada — adicione linhas nela.';
   tabelaEdit();
 }
@@ -1135,7 +1205,7 @@ function addLinhaEdit(){
   if(!cod){$('#eMsg').textContent='SKU inválido.';return;}
   materializa();
   if(!(cx>0))cx=manuais.length||1;
-  if(cx>manuais.length)manuais.push({manual:true,rows:[{cod,qty:q}]});
+  if(cx>manuais.length)manuais.push({id:uid(),manual:true,rows:[{cod,qty:q}]});
   else manuais[cx-1].rows.push({cod,qty:q});
   $('#eSku').value='';$('#eTam').value='';$('#eQt').value='';$('#eSku').focus();
   commit('Linha adicionada na caixa '+Math.min(cx,manuais.length)+'.');
@@ -1188,8 +1258,14 @@ function render(){
   $('#kAl').textContent=alerts.length;
   $('#kHold').textContent=retidos.reduce((s,l)=>s+l.qty,0);
 
+  /* aviso de duplicata em tempo real */
+  const cc=new Map();
+  bx.forEach(b=>{const k=sigConteudo(b);cc.set(k,(cc.get(k)||0)+1);});
+  const nDup=[...cc.values()].filter(v=>v>1).length;
+
   $('#pend').innerHTML=
-    (naoMapeados.size?`⚠ ${naoMapeados.size} código(s) sem substituição — <a href="#" onclick="aba('sub');return false">ver aba Substituições</a><br>`:'')
+    (nDup?`🔁 ${nDup} conteúdo(s) de caixa repetido(s) — <a href="#" onclick="aba('edi');return false">mesclar na aba Editar</a><br>`:'')
+    +(naoMapeados.size?`⚠ ${naoMapeados.size} código(s) sem substituição — <a href="#" onclick="aba('sub');return false">ver aba Substituições</a><br>`:'')
     +(retidos.length?`🚫 ${retidos.length} produto(s) marcados como <b>não vai hoje</b> (${retidos.reduce((s,l)=>s+l.qty,0)} pares) — <a href="#" onclick="aba('edi');return false">ver aba Editar</a><br>`:'')
     +(alerts.length
       ? `⚠ ${alerts.length} etiqueta(s) abaixo de ${CAP_MIN} pares — clique para ir: `
@@ -1380,8 +1456,9 @@ baixaNuvem()
   .catch(()=>false)
   .finally(()=>{
     recarregaEstado();
-    prontoParaEnviar=true;      /* só agora o app pode gravar/enviar */
-    snapshot();                 /* marco zero do dia */
+    prontoParaEnviar=true;
+    salvaTudo();     /* publica a limpeza feita no boot (era o furo B) */
+    snapshot();
   });
 </script>
 </html>
