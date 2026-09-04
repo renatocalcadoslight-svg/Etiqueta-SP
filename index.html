@@ -221,7 +221,7 @@ table.grd td.tc{font-weight:800;background:#f7f9fc}
       <button class="dng" onclick="zerarTudo()">🧹 Zerar tudo</button>
       <span id="info" class="hint" style="margin:0"></span>
     </div>
-    <div class="hint">💾 Tudo é salvo automaticamente no navegador — F5 ou queda de energia não apagam nada.</div>
+    <div class="hint">☁ Tudo é salvo direto no Supabase, caixa por caixa — vários usuários ao mesmo tempo sem sobrescrever.</div>
   </div>
 
   <div class="panel">
@@ -391,128 +391,22 @@ table.grd td.tc{font-weight:800;background:#f7f9fc}
 </div>
 
 <script>
-/* ================= CHAVES ================= */
-const K_MAN='etq_man2', K_RAW='etq_raw', K_LOTE='etq_lote',
-      K_BUF='etq_buf', K_HOLD='etq_hold', K_SUBS='etq_subs',
-      K_HIST='etq_hist', K_REV='etq_rev';
-const CHAVES=[K_MAN,K_RAW,K_BUF,K_HOLD,K_SUBS,K_LOTE];
-
-const $=s=>document.querySelector(s);
-const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
-
 /* ================= SUPABASE ================= */
 const SB = supabase.createClient(
   'https://amosobmwfolzzbjxtqre.supabase.co',
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFtb3NvYm13Zm9senpianh0cXJlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgzNzMwMTcsImV4cCI6MjEwMzk0OTAxN30.yhnPht5Me4XgVN85QA9-zjEjXEOLq8t6rHEABqiSwzQ'
 );
-const DOC_ID='etiquetas-sp';
+const LOTE='etiquetas-sp';
+const K_LOTE='etq_lote', K_BUF='etq_buf', K_HIST='etq_hist';
 
-const _set=localStorage.setItem.bind(localStorage);
-const _rem=localStorage.removeItem.bind(localStorage);
-localStorage.setItem=(k,v)=>{ _set(k,v); if(!sincronizando&&CHAVES.includes(k))enviaNuvem(); };
-localStorage.removeItem=k=>{ _rem(k);   if(!sincronizando&&CHAVES.includes(k))enviaNuvem(); };
-
-let sincronizando=false, filaSync=null, ultimoEnvio='';
-let prontoParaEnviar=false, zeragemIntencional=false;
-let revLocal=+(localStorage.getItem(K_REV)||0);   /* PATCH C: controle de versão */
-
-const assina=o=>JSON.stringify(CHAVES.map(k=>o?.[k]??null));
-
-function avisoSync(msg){
-  const el=$('#syncWarn'); if(!el)return;
-  el.innerHTML=msg||''; el.style.display=msg?'block':'none';
-}
-
-function mesclaHold(remoto){
-  let local=[], rem=[];
-  try{ local=JSON.parse(localStorage.getItem(K_HOLD)||'[]'); }catch(e){}
-  try{ rem=JSON.parse(remoto||'[]'); }catch(e){ return; }
-  const m=new Map();
-  [...local,...rem].forEach(l=>{
-    if(!l||!l.cod)return;
-    const a=m.get(l.cod);
-    if(!a||(+l.qty||0)>(+a.qty||0)) m.set(l.cod,{cod:l.cod,qty:+l.qty||0,cx:l.cx||0});
-  });
-  _set(K_HOLD,JSON.stringify([...m.values()]));
-}
-
-async function baixaNuvem(){
-  const {data,error}=await SB.from('app_state').select('data').eq('id',DOC_ID).maybeSingle();
-  if(error||!data?.data)return false;
-
-  const revRemota=+(data.data._rev||0);
-  if(revRemota<revLocal)return false;            /* remoto atrasado: ignora */
-  revLocal=revRemota; _set(K_REV,revLocal);
-
-  const hash=assina(data.data);
-  if(hash===ultimoEnvio)return false;
-  ultimoEnvio=hash;
-  sincronizando=true;
-  CHAVES.forEach(k=>{
-    const v=data.data[k];
-    if(k===K_HOLD){ if(v!==null&&v!==undefined)mesclaHold(v); return; }
-    if(v===null||v===undefined) _rem(k);
-    else _set(k,v);
-  });
-  sincronizando=false;
-  return true;
-}
-
-function payloadVazio(p){
-  return CHAVES.every(k=>{
-    const v=p[k];
-    return v===null||v===undefined||v===''||v==='[]'||v==='{}';
-  });
-}
-
-function enviaNuvem(){
-  if(!prontoParaEnviar)return;
-  clearTimeout(filaSync);
-  filaSync=setTimeout(async()=>{
-    const payload={};
-    CHAVES.forEach(k=>{ payload[k]=localStorage.getItem(k); });
-
-    if(payloadVazio(payload)&&!zeragemIntencional){
-      ultimoEnvio='';
-      $('#info').textContent='⚠ Envio vazio bloqueado (proteção)';
-      avisoSync('🛡 Um envio com <b>estado totalmente vazio</b> foi bloqueado. '
-        +'Nada foi apagado na nuvem. Para limpar de verdade use <b>🧹 Zerar tudo</b>.');
-      return;
-    }
-    zeragemIntencional=false;
-
-    const hash=assina(payload);
-    if(hash===ultimoEnvio)return;
-
-    /* PATCH C: não sobrescrever quem publicou depois de mim */
-    const {data:atual}=await SB.from('app_state').select('data').eq('id',DOC_ID).maybeSingle();
-    const revNuvem=+(atual?.data?._rev||0);
-    if(revNuvem>revLocal){
-      await baixaNuvem(); recarregaEstado();
-      avisoSync('🔄 Outro aparelho salvou primeiro — estado recarregado. '
-        +'Confira e refaça a última edição, se necessário.');
-      return;
-    }
-    revLocal=revNuvem+1; _set(K_REV,revLocal);
-    payload._rev=revLocal;
-    ultimoEnvio=hash;
-
-    const {error}=await SB.from('app_state')
-      .upsert({id:DOC_ID,data:payload,updated_at:new Date()});
-    $('#info').textContent=error?'⚠ Falha ao sincronizar'
-      :'☁ Sincronizado '+new Date().toLocaleTimeString('pt-BR')+' (v'+revLocal+')';
-    if(!error)avisoSync('');
-  },1500);
-}
-
-document.addEventListener('visibilitychange',()=>{
-  if(document.hidden){ snapshot(); clearTimeout(filaSync); return; }
-  baixaNuvem().then(m=>{ if(m)recarregaEstado(); });
-});
+const $=s=>document.querySelector(s);
+const uid=()=>'m'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const EU=(()=>{ let d=localStorage.getItem('cli_id');
+  if(!d){d='c'+Math.random().toString(36).slice(2,8);localStorage.setItem('cli_id',d);}
+  return d; })();
 
 /* ================= CONFIG ================= */
 const CAP_MIN=20, CAP_MAX=25, LIN_FIXAS=5;
-
 const num=v=>typeof v==='number'?v:(v!=null&&v!==''&&!isNaN(v)?+v:null);
 const norm=s=>String(s).toUpperCase().replace(/\s+/g,' ').trim();
 const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
@@ -594,11 +488,131 @@ const SUBS_PADRAO = {
   "PATRULHA FEMININA":"PCF"
 };
 const BASE=Object.fromEntries(Object.entries(SUBS_PADRAO).map(([k,v])=>[norm(k),norm(v)]));
+
+/* ================= ESTADO ================= */
+let mapa=new Map();          /* id -> caixa: fonte única de verdade */
+let subsDB={};               /* substituições vindas do banco */
 let subs={...BASE};
-try{ subs={...BASE, ...JSON.parse(localStorage.getItem(K_SUBS)||'{}')}; }catch(e){}
-const salvaSubs=()=>localStorage.setItem(K_SUBS,JSON.stringify(subs));
+let retidos=[];              /* espelho da tabela held */
+let buffer=[];               /* etiqueta em edição — local, por usuário */
+let pronto=false;            /* trava: nada é gravado antes do primeiro load */
 const naoMapeados=new Set();
 
+try{ buffer=JSON.parse(localStorage.getItem(K_BUF)||'[]'); }catch(e){ buffer=[]; }
+const salvaBuffer=()=>localStorage.setItem(K_BUF,JSON.stringify(buffer));
+
+const caixas=()=>[...mapa.values()].sort((a,b)=>a.seq-b.seq);
+const proximaSeq=()=>(mapa.size?Math.max(...[...mapa.values()].map(b=>+b.seq||0)):0)+1000;
+const box=id=>mapa.get(id);
+
+function avisoSync(msg){
+  const el=$('#syncWarn'); if(!el)return;
+  el.innerHTML=msg||''; el.style.display=msg?'block':'none';
+}
+
+/* ================= PERSISTÊNCIA — CAIXAS ================= */
+function linhaDB(b,ts){
+  return {id:b.id,lote:LOTE,seq:b.seq,sku:b.sku??null,manual:b.manual!==false,
+    alerta:!!b.alerta,origem:b.origem??null,rows:b.rows,
+    updated_at:ts,updated_by:EU,deleted:false};
+}
+async function gravaCaixa(b){
+  if(!pronto)return;
+  const ts=new Date().toISOString();
+  b.updated_at=ts; b.updated_by=EU;
+  mapa.set(b.id,b);
+  const {error}=await SB.rpc('upsert_box',{b:linhaDB(b,ts)});
+  if(error)$('#info').textContent='⚠ '+error.message;
+}
+async function gravaMuitas(bs){
+  if(!pronto||!bs.length)return;
+  const ts=new Date().toISOString();
+  bs.forEach(b=>{b.updated_at=ts;b.updated_by=EU;mapa.set(b.id,b);});
+  const {error}=await SB.from('boxes').upsert(bs.map(b=>linhaDB(b,ts)));
+  if(error)$('#info').textContent='⚠ '+error.message;
+}
+async function removeCaixa(id){
+  if(!pronto)return;
+  mapa.delete(id);
+  await SB.from('boxes').update({deleted:true,updated_at:new Date().toISOString(),updated_by:EU})
+    .eq('id',id);
+}
+async function removeMuitas(ids){
+  if(!pronto||!ids.length)return;
+  ids.forEach(id=>mapa.delete(id));
+  await SB.from('boxes').update({deleted:true,updated_at:new Date().toISOString(),updated_by:EU})
+    .in('id',ids);
+}
+
+/* ================= PERSISTÊNCIA — RETIDOS ================= */
+async function gravaHold(l){
+  if(!pronto)return;
+  await SB.from('held').upsert({lote:LOTE,cod:l.cod,qty:l.qty,cx:l.cx||0,
+    updated_at:new Date().toISOString()});
+}
+async function apagaHold(cod){
+  if(!pronto)return;
+  await SB.from('held').delete().eq('lote',LOTE).eq('cod',cod);
+}
+
+/* ================= PERSISTÊNCIA — SUBSTITUIÇÕES ================= */
+function refazSubs(){ subs={...BASE,...subsDB}; }
+async function gravaSubs(pares){
+  if(!pronto||!pares.length)return;
+  await SB.from('subs').upsert(pares.map(([de,para])=>({de,para,
+    updated_at:new Date().toISOString()})));
+}
+
+/* ================= CARGA INICIAL ================= */
+async function carrega(){
+  const [bx,hd,sb]=await Promise.all([
+    SB.from('boxes').select('*').eq('lote',LOTE).eq('deleted',false).order('seq'),
+    SB.from('held').select('*').eq('lote',LOTE),
+    SB.from('subs').select('*')
+  ]);
+  if(bx.error){$('#info').textContent='⚠ '+bx.error.message;return;}
+  mapa=new Map((bx.data||[]).map(b=>[b.id,b]));
+  retidos=(hd.data||[]).filter(l=>l&&l.cod&&+l.qty>0)
+    .map(l=>({cod:l.cod,qty:+l.qty,cx:+l.cx||0}));
+  subsDB=Object.fromEntries((sb.data||[]).map(r=>[norm(r.de),norm(r.para)]));
+  refazSubs();
+  $('#lote').value=localStorage.getItem(K_LOTE)||'';
+  pronto=true;
+  aplica();
+  $('#info').textContent='☁ '+mapa.size+' caixa(s) carregadas';
+}
+function aplica(){
+  checaMapas(); pintaBuf(); render(); tabelaEdit(); renderSubs();
+  if($('#pn-rel').classList.contains('on'))relatorio();
+}
+
+/* ================= REALTIME ================= */
+SB.channel('boxes-'+LOTE)
+  .on('postgres_changes',{event:'*',schema:'public',table:'boxes',
+      filter:'lote=eq.'+LOTE},({new:n})=>{
+    if(!n||n.updated_by===EU)return;
+    n.deleted?mapa.delete(n.id):mapa.set(n.id,n);
+    aplica();
+    $('#info').textContent='🔄 atualizado por outro usuário';
+  })
+  .on('postgres_changes',{event:'*',schema:'public',table:'held',
+      filter:'lote=eq.'+LOTE},()=>{ recarregaHold(); })
+  .on('postgres_changes',{event:'*',schema:'public',table:'subs'},()=>{ recarregaSubs(); })
+  .subscribe();
+
+async function recarregaHold(){
+  const {data}=await SB.from('held').select('*').eq('lote',LOTE);
+  retidos=(data||[]).filter(l=>l&&l.cod&&+l.qty>0)
+    .map(l=>({cod:l.cod,qty:+l.qty,cx:+l.cx||0}));
+  render(); tabelaHold();
+}
+async function recarregaSubs(){
+  const {data}=await SB.from('subs').select('*');
+  subsDB=Object.fromEntries((data||[]).map(r=>[norm(r.de),norm(r.para)]));
+  refazSubs(); checaMapas(); renderSubs();
+}
+
+/* ================= MAPEAMENTO DE CÓDIGOS ================= */
 function partes(sku,tam){
   let base=String(sku||'').trim(), sz=String(tam||'').trim();
   if(!sz){
@@ -619,7 +633,7 @@ function montaCod(sku,tam){
   if(!cod){naoMapeados.add(base);cod=base;}
   return cod+(sz?'-'+sz:'');
 }
- function checaMapas(){
+function checaMapas(){
   naoMapeados.clear();
   const valores=new Set(Object.values(subs));
   caixas().forEach(b=>b.rows.forEach(x=>{
@@ -627,39 +641,19 @@ function montaCod(sku,tam){
     if(!subs[ref]&&!valores.has(ref)) naoMapeados.add(ref);
   }));
 }
- 
 
-/* ================= ESTADO ================= */
-let rawRows=null, planilha=[], buffer=[], manuais=[], retidos=[];
-
-function salvaTudo(){
-  if(!prontoParaEnviar)return;
-  try{
-    localStorage.setItem(K_MAN,JSON.stringify(manuais));
-    localStorage.setItem(K_BUF,JSON.stringify(buffer));
-    localStorage.setItem(K_HOLD,JSON.stringify(retidos));
-    localStorage.setItem(K_LOTE,($('#lote').value||''));
-    if(rawRows) localStorage.setItem(K_RAW,JSON.stringify(rawRows));
-    else localStorage.removeItem(K_RAW);
-  }catch(e){
-    console.warn('Falha ao salvar:',e);
-    $('#info').textContent='⚠ Armazenamento cheio — exporte o CSV por segurança.';
-  }
-}
-const salva=()=>salvaTudo();
-function salvaLote(){ if(prontoParaEnviar)localStorage.setItem(K_LOTE,$('#lote').value||''); render(); }
-
+/* ================= BACKUP LOCAL ================= */
+function salvaLote(){ localStorage.setItem(K_LOTE,$('#lote').value||''); render(); }
 function snapshot(){
-  if(!prontoParaEnviar)return;
+  if(!pronto)return;
   try{
     const h=JSON.parse(localStorage.getItem(K_HIST)||'[]');
+    const agora={t:Date.now(),man:caixas(),hold:retidos,lote:$('#lote').value||''};
     const ult=h[0];
-    const agora={t:Date.now(),man:manuais,raw:rawRows,buf:buffer,
-                 hold:retidos,lote:$('#lote').value||''};
     if(ult&&JSON.stringify(ult.man)===JSON.stringify(agora.man)
-        &&JSON.stringify(ult.hold)===JSON.stringify(agora.hold))return;
+       &&JSON.stringify(ult.hold)===JSON.stringify(agora.hold))return;
     h.unshift(agora);
-    _set(K_HIST,JSON.stringify(h.slice(0,20)));
+    localStorage.setItem(K_HIST,JSON.stringify(h.slice(0,20)));
   }catch(e){}
 }
 setInterval(snapshot,60000);
@@ -668,108 +662,61 @@ window.addEventListener('beforeunload',snapshot);
 function listaBackups(){
   let h=[];
   try{ h=JSON.parse(localStorage.getItem(K_HIST)||'[]'); }catch(e){}
-  if(!h.length){alert('Nenhum backup disponível ainda (o primeiro é criado após 1 minuto de uso).');return;}
+  if(!h.length){alert('Nenhum backup local ainda (o primeiro é criado após 1 minuto de uso).');return;}
   const menu=h.map((b,i)=>`${i} — ${new Date(b.t).toLocaleString('pt-BR')} · `
     +`${(b.man||[]).length} caixa(s) · ${(b.hold||[]).length} retido(s)`).join('\n');
-  const r=prompt('Backups locais disponíveis:\n\n'+menu+'\n\nDigite o número a restaurar:','0');
+  const r=prompt('Backups locais deste navegador:\n\n'+menu+'\n\nDigite o número a restaurar:','0');
   if(r===null)return;
   const i=parseInt(r,10);
   if(!(i>=0)||!h[i]){alert('Número inválido.');return;}
   restauraBackup(i);
 }
-function restauraBackup(i=0){
+async function restauraBackup(i=0){
   let h=null;
   try{ h=(JSON.parse(localStorage.getItem(K_HIST)||'[]'))[i]; }catch(e){}
   if(!h){alert('Backup não encontrado.');return;}
-  if(!confirm('Restaurar o backup de '+new Date(h.t).toLocaleString('pt-BR')+'?\nO estado atual será substituído.'))return;
-  manuais=dedupCaixas(h.man||[]); rawRows=h.raw||null; buffer=h.buf||[]; retidos=h.hold||retidos;
-  planilha=rawRows?boxes(rawRows,CAP_MIN,CAP_MAX):[];
+  if(!confirm('Restaurar o backup de '+new Date(h.t).toLocaleString('pt-BR')
+    +'?\nAs caixas atuais do lote serão substituídas para TODOS os usuários.'))return;
+  await removeMuitas([...mapa.keys()]);
+  const bs=(h.man||[]).filter(b=>b&&Array.isArray(b.rows)&&b.rows.length)
+    .map((b,k)=>({id:b.id||uid(),seq:(k+1)*1000,sku:b.sku??null,manual:b.manual!==false,
+      alerta:!!b.alerta,origem:b.origem??null,rows:b.rows}));
+  await gravaMuitas(bs);
   $('#lote').value=h.lote||'';
-  salvaTudo(); showBuf(); render(); renderSubs(); tabelaEdit();
-  avisoSync('');
+  localStorage.setItem(K_LOTE,$('#lote').value);
+  aplica(); avisoSync('');
 }
 
-/* ===== PATCH A: dedup por ID (não por conteúdo, não por flag) ===== */
-function dedupCaixas(arr){
-  const vistas=new Set(), out=[];
-  (arr||[]).forEach(b=>{
-    if(!b||!Array.isArray(b.rows)||!b.rows.length)return;
-    if(!b.id)b.id=uid();                    /* migra caixas antigas */
-    if(vistas.has(b.id))return;
-    vistas.add(b.id);
-    out.push(b);
-  });
-  return out;
-}
-
-/* ===== PATCH B: limpeza de duplicatas legadas, ignorando o flag manual ===== */
+/* ================= AUDITORIA ================= */
 function limpezaLegado(){
-  const vistas=new Map();
-  manuais.forEach(b=>{
+  const vistas=new Map(), remover=[];
+  caixas().forEach(b=>{
     const k=sigConteudo(b);
     if(!k)return;
-    if(!vistas.has(k))vistas.set(k,b);
+    if(vistas.has(k))remover.push(b.id); else vistas.set(k,b);
   });
-  const antes=manuais.length;
-  manuais=[...vistas.values()];
-  return antes-manuais.length;
+  return remover;
 }
-
-function mesclaIguais(){
-  const n=limpezaLegado();
-  if(!n){alert('Nenhuma caixa idêntica encontrada.');return;}
+async function mesclaIguais(){
+  const rem=limpezaLegado();
+  if(!rem.length){alert('Nenhuma caixa idêntica encontrada.');return;}
   snapshot();
-  commit(n+' caixa(s) duplicada(s) removida(s).');
+  await removeMuitas(rem);
+  commit(rem.length+' caixa(s) duplicada(s) removida(s).');
 }
-
 function auditoria(){
-  const c=new Map();
-  manuais.forEach(b=>{const k=sigConteudo(b); c.set(k,(c.get(k)||0)+1);});
+  const bx=caixas(), c=new Map();
+  bx.forEach(b=>{const k=sigConteudo(b);c.set(k,(c.get(k)||0)+1);});
   const dup=[...c].filter(([,n])=>n>1);
-  const semId=manuais.filter(b=>!b.id).length;
-  const flags=manuais.filter(b=>b.manual===false).length;
-  alert('Auditoria do estado atual\n\n'
-    +'Caixas: '+manuais.length+'\n'
+  const flags=bx.filter(b=>b.manual===false).length;
+  alert('Auditoria do lote '+LOTE+'\n\n'
+    +'Caixas: '+bx.length+'\n'
     +'Conteúdos duplicados: '+dup.length+'\n'
-    +'Caixas sem id: '+semId+'\n'
-    +'Flag planilha / manual: '+flags+' / '+(manuais.length-flags)+'\n'
-    +'Revisão de sync: v'+revLocal
+    +'Flag planilha / manual: '+flags+' / '+(bx.length-flags)+'\n'
+    +'Retidos: '+retidos.length+'\n'
+    +'Meu id de cliente: '+EU
     +(dup.length?'\n\nUse “🔗 Mesclar caixas idênticas” na aba Editar.':'\n\n✔ Sem duplicatas.'));
 }
-
-function recarregaEstado(){
-  try{ manuais=JSON.parse(localStorage.getItem(K_MAN)||'[]'); }catch(e){ manuais=[]; }
-  try{ buffer =JSON.parse(localStorage.getItem(K_BUF)||'[]'); }catch(e){ buffer=[]; }
-  try{ retidos=JSON.parse(localStorage.getItem(K_HOLD)||'[]'); }catch(e){ retidos=[]; }
-  try{ subs={...BASE, ...JSON.parse(localStorage.getItem(K_SUBS)||'{}')}; }catch(e){ subs={...BASE}; }
-
-  const r=localStorage.getItem(K_RAW);
-  try{ rawRows=r?JSON.parse(r):null; }catch(e){ rawRows=null; }
-
-  if(rawRows&&manuais.some(b=>b.manual===false)){
-    rawRows=null;
-    sincronizando=true;_rem(K_RAW);sincronizando=false;
-  }
-
-  naoMapeados.clear();
-  planilha=rawRows?boxes(rawRows,CAP_MIN,CAP_MAX):[];
-
-  const antes=manuais.length;
-  manuais=dedupCaixas(manuais);
-  const removidas=limpezaLegado();
-  retidos=retidos.filter(l=>l&&l.cod&&+l.qty>0);
-
-  /* ⬅ o que faltava: persistir a limpeza no localStorage E na nuvem */
-  if(manuais.length!==antes){
-    salvaTudo();
-    if(removidas)$('#info').textContent=removidas+' caixa(s) duplicada(s) removida(s).';
-  }
-
-  $('#lote').value=localStorage.getItem(K_LOTE)||'';
-  pintaBuf(); render(); renderSubs(); tabelaEdit();
-}
-
-const caixas=()=>[...planilha,...manuais];
 
 /* ================= NAVEGAÇÃO ================= */
 function aba(k){
@@ -785,7 +732,7 @@ function aba(k){
 function subTab(id){
   document.querySelectorAll('#subtabs button').forEach(b=>b.classList.toggle('on',b.dataset.s===id));
   document.querySelectorAll('.sub').forEach(p=>p.classList.toggle('on',p.id==='s-'+id));
-  _set('etq_sub',id);
+  localStorage.setItem('etq_sub',id);
   if(id==='grade')grade();
 }
 $('#subtabs').addEventListener('click',e=>{
@@ -793,31 +740,48 @@ $('#subtabs').addEventListener('click',e=>{
 });
 
 /* ================= CRUD SUBSTITUIÇÕES ================= */
-function addSub(){
+async function addSub(){
   const de=$('#sDe').value.trim(), para=$('#sPara').value.trim();
   $('#sMsg').textContent='';
   if(!de||!para){$('#sMsg').textContent='Preencha DE e PARA.';return;}
-  subs[norm(de)]=norm(para);salvaSubs();
+  subsDB[norm(de)]=norm(para); refazSubs();
   $('#sDe').value='';$('#sPara').value='';$('#sDe').focus();
+  await gravaSubs([[norm(de),norm(para)]]);
   reprocessa();
 }
-function delSub(k){delete subs[k];salvaSubs();reprocessa();}
-function editSub(k){
+async function delSub(k){
+  delete subsDB[k]; refazSubs();
+  await SB.from('subs').delete().eq('de',k);
+  reprocessa();
+}
+async function editSub(k){
   const v=prompt('Novo código para "'+k+'":',subs[k]);
-  if(v&&v.trim()){subs[k]=norm(v);salvaSubs();reprocessa();}
+  if(!v||!v.trim())return;
+  subsDB[k]=norm(v); refazSubs();
+  await gravaSubs([[k,norm(v)]]);
+  reprocessa();
 }
-function limpaSubs(){
-  if(!Object.keys(subs).length){alert('Nenhuma substituição cadastrada.');return;}
-  if(confirm('Remover TODAS as substituições?')){subs={};salvaSubs();reprocessa();}
+async function limpaSubs(){
+  const ks=Object.keys(subsDB);
+  if(!ks.length){alert('Nenhuma substituição personalizada cadastrada.');return;}
+  if(!confirm('Remover as '+ks.length+' substituições personalizadas?\nAs padrão do sistema permanecem.'))return;
+  subsDB={}; refazSubs();
+  await SB.from('subs').delete().in('de',ks);
+  reprocessa();
 }
-function importaSubs(){
-  let n=0;
+async function importaSubs(){
+  const novos=[];
   $('#sBulk').value.split(/\n/).map(l=>l.trim()).filter(Boolean).forEach(l=>{
     const m=l.match(/^(.*?)\s*(?:=>|->|=|;|\t|\|)\s*(.+)$/);
-    if(m&&m[1].trim()&&m[2].trim()){subs[norm(m[1])]=norm(m[2]);n++;}
+    if(m&&m[1].trim()&&m[2].trim())novos.push([norm(m[1]),norm(m[2])]);
   });
-  $('#sMsg').textContent=n?'':'Nada reconhecido. Use: DE = PARA';
-  if(n){$('#sBulk').value='';salvaSubs();reprocessa();$('#sInfo').textContent=n+' substituição(ões) importada(s).';}
+  if(!novos.length){$('#sMsg').textContent='Nada reconhecido. Use: DE = PARA';return;}
+  $('#sMsg').textContent='';
+  novos.forEach(([d,p])=>subsDB[d]=p); refazSubs();
+  $('#sBulk').value='';
+  await gravaSubs(novos);
+  reprocessa();
+  $('#sInfo').textContent=novos.length+' substituição(ões) importada(s).';
 }
 function exportaSubs(){
   let csv='DE;PARA\n';
@@ -858,26 +822,30 @@ function renderSubs(){
 }
 function preenche(k){aba('sub');$('#sDe').value=k;$('#sPara').focus();}
 
-function reprocessa(){
-  manuais.forEach(b=>b.rows.forEach(x=>{x.cod=montaCod(x.cod);}));
-  checaMapas();
-  salva();render();renderSubs();
+async function reprocessa(){
+  const alterar=[];
+  caixas().forEach(b=>{
+    let mudou=false;
+    b.rows.forEach(x=>{const c=montaCod(x.cod); if(c&&c!==x.cod){x.cod=c;mudou=true;}});
+    if(mudou)alterar.push(b);
+  });
+  await gravaMuitas(alterar);
+  checaMapas(); render(); renderSubs(); tabelaEdit();
 }
-  
+
 /* ================= ZERAR ================= */
-function zerarTudo(){
-  const n=planilha.length+manuais.length+buffer.length;
-  if(!n){alert('Não há nada para zerar.');return;}
-  if(!confirm(`Apagar TODAS as etiquetas (${planilha.length} da planilha + ${manuais.length} manuais)?\n`
+async function zerarTudo(){
+  const n=mapa.size;
+  if(!n&&!buffer.length){alert('Não há nada para zerar.');return;}
+  if(!confirm(`Apagar TODAS as ${n} etiquetas do lote, para todos os usuários?\n`
     +`As substituições e os ${retidos.length} item(ns) marcados como “não vai hoje” serão mantidos.`))return;
   snapshot();
-  zeragemIntencional=true;
-  planilha=[];manuais=[];buffer=[];rawRows=null;naoMapeados.clear();
-  [K_MAN,K_RAW,K_BUF].forEach(k=>localStorage.removeItem(k));
+  await removeMuitas([...mapa.keys()]);
+  buffer=[];salvaBuffer();
   $('#f').value='';$('#mRef').value='';$('#mTam').value='';$('#mQt').value='';$('#mBulk').value='';
   $('#eSku').value='';$('#eTam').value='';$('#eQt').value='';$('#eCx').value='';
   $('#mMsg').textContent='';$('#filtro').value='';
-  salvaTudo();showBuf();render();renderSubs();tabelaEdit();
+  aplica();
 }
 
 /* ================= ENTRADA MANUAL ================= */
@@ -897,13 +865,16 @@ function pintaBuf(){
       +` <b style="margin-left:6px">Total: ${buffer.reduce((s,x)=>s+x.qty,0)} pares</b>`
     : '<i style="color:var(--mut)">Nenhuma linha na etiqueta em edição.</i>';
 }
-function showBuf(){ pintaBuf(); salvaTudo(); }
+function showBuf(){ pintaBuf(); salvaBuffer(); }
 
-function fechaEtiqueta(){
+async function fechaEtiqueta(){
   if($('#mRef').value.trim()&&+$('#mQt').value>0) addLinha();
   if(!buffer.length){$('#mMsg').textContent='Adicione pelo menos uma linha.';return;}
-  manuais.push({id:uid(),manual:true,rows:buffer});
-  buffer=[];salva();showBuf();render();renderSubs();
+  const b={id:uid(),seq:proximaSeq(),manual:true,rows:buffer,
+           alerta:buffer.reduce((s,x)=>s+x.qty,0)<CAP_MIN};
+  buffer=[];salvaBuffer();
+  await gravaCaixa(b);
+  aplica();
 }
 function parseBulkRows(){
   const rows=[];
@@ -915,16 +886,19 @@ function parseBulkRows(){
   });
   return rows;
 }
-function importaBulk(umPorLinha){
+async function importaBulk(umPorLinha){
   const rows=parseBulkRows();
   if(!rows.length){$('#mMsg').textContent='Nada reconhecido. Use: SKU TAMANHO QUANTIDADE';return;}
-  umPorLinha
-    ? rows.forEach(r=>manuais.push({id:uid(),manual:true,rows:[r]}))
-    : manuais.push({id:uid(),manual:true,rows});
-  $('#mBulk').value='';salva();render();renderSubs();
+  let s=proximaSeq();
+  const novas=umPorLinha
+    ? rows.map(r=>({id:uid(),seq:(s+=1000),manual:true,rows:[r],alerta:r.qty<CAP_MIN}))
+    : [{id:uid(),seq:s,manual:true,rows,alerta:rows.reduce((a,x)=>a+x.qty,0)<CAP_MIN}];
+  $('#mBulk').value='';
+  await gravaMuitas(novas);
+  aplica();
 }
 
-function distribuiAuto(rows){
+function distribuiAuto(rows,seqInicial){
   const porRef=new Map();
   rows.forEach(r=>{
     const ref=r.cod.replace(/-\d+$/,'');
@@ -958,77 +932,65 @@ function distribuiAuto(rows){
       s.rest-=take;
     }
   });
+  let sq=seqInicial;
   novas.forEach(b=>{
     const m=new Map();
     b.rows.forEach(x=>m.set(x.cod,(m.get(x.cod)||0)+x.qty));
     b.rows=[...m].map(([cod,qty])=>({cod,qty}))
       .sort((a,c)=>a.cod.localeCompare(c.cod,'pt',{numeric:true}));
     b.alerta=b.rows.reduce((s,x)=>s+x.qty,0)<CAP_MIN;
+    b.seq=(sq+=1000);
   });
   return novas;
 }
-function importaBulkAuto(){
+async function importaBulkAuto(){
   const rows=parseBulkRows();
   if(!rows.length){$('#mMsg').textContent='Nada reconhecido. Use: SKU TAMANHO QUANTIDADE';return;}
-  const novas=distribuiAuto(rows);
-  manuais.push(...novas);
+  const novas=distribuiAuto(rows,proximaSeq());
   $('#mBulk').value='';$('#mMsg').textContent='';
-  salva();render();renderSubs();
+  await gravaMuitas(novas);
+  aplica();
   $('#info').textContent=`${novas.length} caixa(s) de ${CAP_MIN} pares geradas.`;
 }
-function redistribui20(){
+async function redistribui20(){
   const rows=[];
   caixas().forEach(b=>b.rows.forEach(x=>rows.push({cod:x.cod,qty:x.qty})));
   if(!rows.length){alert('Não há linhas para redistribuir.');return;}
   if(!confirm('Refazer todas as caixas em pacotes de '+CAP_MIN+' pares?\nItens retidos não são afetados.'))return;
   snapshot();
-  planilha=[];rawRows=null;
-  sincronizando=true;_rem(K_RAW);sincronizando=false;
-  manuais=distribuiAuto(rows);
-  commit(manuais.length+' caixa(s) geradas.');
-}
-function delEt(i){
-  const b=caixas()[i]; if(!b)return;
-  let k=manuais.indexOf(b);
-  if(k>-1)manuais.splice(k,1);
-  else{k=planilha.indexOf(b); if(k>-1)planilha.splice(k,1);}
-  salva();render();
+  await removeMuitas([...mapa.keys()]);
+  const novas=distribuiAuto(rows,0);
+  await gravaMuitas(novas);
+  commit(novas.length+' caixa(s) geradas.');
 }
 
 /* ================= PLANILHA ================= */
-$('#f').setAttribute('multiple','');   // permite selecionar vários de uma vez
+$('#f').setAttribute('multiple','');
 
 $('#f').addEventListener('change',async e=>{
   const files=[...e.target.files];
   if(!files.length)return;
   snapshot();
 
-  materializa();                        /* congela as caixas já existentes */
-  let novas=0, pares=0;
-
+  let seq=proximaSeq(), novas=[], pares=0;
   for(const file of files){
-    /* dentro do loop de arquivos, antes de processar */
-if(manuais.some(b=>b.origem===file.name)
-   && !confirm(`“${file.name}” já foi importado. Importar de novo e somar?`)) continue;
+    if([...mapa.values()].some(b=>b.origem===file.name)
+       && !confirm(`“${file.name}” já foi importado. Importar de novo e somar?`)) continue;
     const wb=XLSX.read(await file.arrayBuffer(),{type:'array'});
     for(const nome of wb.SheetNames){
       const rows=XLSX.utils.sheet_to_json(wb.Sheets[nome],{header:1,defval:null});
-      const bx=boxes(rows,CAP_MIN,CAP_MAX);
-      bx.forEach(b=>{
-        manuais.push({id:uid(),manual:false,sku:b.sku,alerta:!!b.alerta,
-                      origem:file.name,rows:b.rows});
-        novas++; pares+=tot(b);
+      boxes(rows,CAP_MIN,CAP_MAX).forEach(b=>{
+        novas.push({id:uid(),seq:(seq+=1000),manual:false,sku:b.sku,
+                    alerta:!!b.alerta,origem:file.name,rows:b.rows});
+        pares+=tot(b);
       });
     }
   }
-
-  rawRows=null;
-  sincronizando=true;_rem(K_RAW);sincronizando=false;
-
-  e.target.value='';                    /* permite reimportar o mesmo arquivo */
+  e.target.value='';
+  await gravaMuitas(novas);
   checaMapas();
-  commit(novas
-    ? `+${novas} caixa(s) e ${pares} pares importados de ${files.length} arquivo(s).`
+  commit(novas.length
+    ? `+${novas.length} caixa(s) e ${pares} pares importados de ${files.length} arquivo(s).`
     : 'Nenhuma linha reconhecida na planilha.');
 });
 
@@ -1062,7 +1024,7 @@ function boxes(rows,capMin,capMax){
     const qLinha=its.reduce((s,x)=>s+x.qty,0);
     let b=(pend&&pend.sku===sku)?pend:null;
     if(b&&tot(b)<capMin&&qLinha>=capMin){ b.alerta=true; fecha(b); b=null; pend=null; }
-    if(!b){ if(pend)fecha(pend); b={id:uid(),sku,rows:[]}; }
+    if(!b){ if(pend)fecha(pend); b={sku,rows:[]}; }
     const cod=codigo(sku);
     b.rows.push(...its.sort((a,c)=>a.size-c.size).map(x=>({cod:`${cod}-${x.size}`,qty:x.qty})));
     if(tot(b)>=capMin){fecha(b);pend=null;}else pend=b;
@@ -1073,65 +1035,71 @@ function boxes(rows,capMin,capMax){
 }
 
 /* ================= ABA EDITAR ================= */
-/* PATCH extra: idempotente — chamadas em cascata não duplicam mais */
-function materializa(){
-  if(!planilha.length)return;
-  const jaTem=new Set(manuais.map(b=>b.id));
-  const novos=planilha.map(b=>({id:b.id||uid(),manual:false,sku:b.sku,
-    alerta:!!b.alerta,rows:b.rows.map(x=>({cod:x.cod,qty:x.qty}))}));
-  manuais=[...novos.filter(b=>!jaTem.has(b.id)),...manuais];
-  planilha=[];rawRows=null;
-  sincronizando=true;_rem(K_RAW);sincronizando=false;
-  manuais=dedupCaixas(manuais);
-  salva();
-}
-function recalcAlertas(){
-  manuais.forEach(b=>{b.alerta=tot(b)<CAP_MIN;});
-  planilha.forEach(b=>{b.alerta=tot(b)<CAP_MIN;});
-}
-function limpaVazias(){ manuais=dedupCaixas(manuais.filter(b=>b.rows.length)); }
-function commit(msg){
+async function commit(msg){
   const wy=window.scrollY;
-  limpaVazias();recalcAlertas();salva();
-  render();tabelaEdit();renderSubs();
+  const vazias=caixas().filter(b=>!b.rows.length).map(b=>b.id);
+  if(vazias.length)await removeMuitas(vazias);
+  aplica();
   if(msg)$('#eInfo').textContent=msg;
   window.scrollTo(0,wy);
   requestAnimationFrame(()=>window.scrollTo(0,wy));
 }
+async function salvaB(b,msg){
+  b.alerta=tot(b)<CAP_MIN;
+  await gravaCaixa(b);
+  commit(msg);
+}
 
 /* ===== RETIDOS ===== */
-function holdLinha(i,j){
-  const b=ref(i); if(!b||!b.rows[j])return;
+async function holdLinha(id,j){
+  const b=box(id); if(!b||!b.rows[j])return;
   const l=b.rows.splice(j,1)[0];
-  retidos.push({cod:l.cod,qty:l.qty,cx:i+1});
+  const pos=caixas().findIndex(x=>x.id===id)+1;
+  const ja=retidos.find(r=>r.cod===l.cod);
+  const novo=ja?{cod:l.cod,qty:ja.qty+l.qty,cx:ja.cx||pos}:{cod:l.cod,qty:l.qty,cx:pos};
+  if(ja)ja.qty=novo.qty; else retidos.push(novo);
   snapshot();
-  commit('“'+l.cod+'” marcado como NÃO VAI HOJE.');
+  await gravaHold(novo);
+  await salvaB(b,'“'+l.cod+'” marcado como NÃO VAI HOJE.');
 }
-function unholdLinha(k){
+async function unholdLinha(k){
   const l=retidos[k]; if(!l)return;
   retidos.splice(k,1);
-  materializa();
-  if(l.cx>0&&manuais[l.cx-1]) manuais[l.cx-1].rows.push({cod:l.cod,qty:l.qty});
-  else manuais.push({id:uid(),manual:true,rows:[{cod:l.cod,qty:l.qty}]});
-  commit('“'+l.cod+'” liberado e devolvido às caixas.');
+  await apagaHold(l.cod);
+  const bx=caixas();
+  const dest=(l.cx>0&&bx[l.cx-1])?bx[l.cx-1]:null;
+  if(dest){ dest.rows.push({cod:l.cod,qty:l.qty}); await salvaB(dest,'“'+l.cod+'” devolvido à caixa '+l.cx+'.'); }
+  else{
+    const b={id:uid(),seq:proximaSeq(),manual:true,rows:[{cod:l.cod,qty:l.qty}],alerta:l.qty<CAP_MIN};
+    await gravaCaixa(b); commit('“'+l.cod+'” liberado em nova caixa.');
+  }
 }
-function setHoldQty(k,v){
+async function setHoldQty(k,v){
   const q=+v; if(!(q>0)){tabelaHold();return;}
-  retidos[k].qty=q; salva(); tabelaHold(); render();
+  retidos[k].qty=q;
+  await gravaHold(retidos[k]);
+  tabelaHold(); render();
 }
-function delHold(k){
+async function delHold(k){
   if(!confirm('Excluir definitivamente “'+retidos[k].cod+'” dos retidos?'))return;
-  retidos.splice(k,1); salva(); tabelaHold(); render();
+  const l=retidos.splice(k,1)[0];
+  await apagaHold(l.cod);
+  tabelaHold(); render();
 }
-function limpaHold(){
+async function limpaHold(){
   if(!retidos.length){alert('Nenhum item retido.');return;}
   if(!confirm('Liberar TODOS os '+retidos.length+' itens retidos de volta às caixas?'))return;
-  materializa();
-  retidos.forEach(l=>{
-    if(l.cx>0&&manuais[l.cx-1]) manuais[l.cx-1].rows.push({cod:l.cod,qty:l.qty});
-    else manuais.push({id:uid(),manual:true,rows:[{cod:l.cod,qty:l.qty}]});
+  const lista=[...retidos], bx=caixas(), alterar=new Set(), novas=[];
+  let seq=proximaSeq();
+  lista.forEach(l=>{
+    const dest=(l.cx>0&&bx[l.cx-1])?bx[l.cx-1]:null;
+    if(dest){ dest.rows.push({cod:l.cod,qty:l.qty}); alterar.add(dest); }
+    else novas.push({id:uid(),seq:(seq+=1000),manual:true,rows:[{cod:l.cod,qty:l.qty}]});
   });
   retidos=[];
+  await SB.from('held').delete().eq('lote',LOTE);
+  [...alterar,...novas].forEach(b=>b.alerta=tot(b)<CAP_MIN);
+  await gravaMuitas([...alterar,...novas]);
   commit('Todos os itens retidos foram liberados.');
 }
 function tabelaHold(){
@@ -1160,8 +1128,8 @@ function tabelaHold(){
 
 function tabelaEdit(){
   if(!$('#tabEdit'))return;
-  const box=$('#tabEdit .tbl-wrap');
-  const sy=box?box.scrollTop:0, wy=window.scrollY;
+  const cx=$('#tabEdit .tbl-wrap');
+  const sy=cx?cx.scrollTop:0, wy=window.scrollY;
 
   const f=norm($('#eFiltro').value||''), bx=caixas();
   const nLin=bx.reduce((s,b)=>s+b.rows.length,0);
@@ -1179,14 +1147,14 @@ function tabelaEdit(){
     html+=`<tr class="sep"><td colspan="5">📦 Caixa ${String(i+1).padStart(2,'0')} — ${tot(b)} pares
       ${b.alerta?'<span class="tag" style="background:var(--wr)">abaixo de '+CAP_MIN+'</span>':''}
       <a href="#" onclick="vaiEtq(${i});return false" style="margin-left:8px">ver etiqueta</a>
-      <a href="#" onclick="delCaixa(${i});return false" style="margin-left:8px;color:var(--err)">excluir caixa</a></td></tr>`;
+      <a href="#" onclick="delCaixa('${b.id}');return false" style="margin-left:8px;color:var(--err)">excluir caixa</a></td></tr>`;
     rows.forEach(({x,j})=>{
       html+=`<tr class="${b.alerta?'al':''}">
-        <td><input class="chk" type="checkbox" checked onchange="holdLinha(${i},${j})" title="desmarque: não vai hoje"></td>
-        <td><input class="cx" type="number" min="1" value="${i+1}" onchange="setCaixa(${i},${j},this.value)"></td>
-        <td><input class="sku" value="${esc(x.cod)}" onchange="setCod(${i},${j},this.value)"></td>
-        <td class="n"><input class="qt" type="number" min="1" value="${x.qty}" onchange="setQty(${i},${j},this.value)"></td>
-        <td><button onclick="delLinha(${i},${j})">🗑</button></td></tr>`;
+        <td><input class="chk" type="checkbox" checked onchange="holdLinha('${b.id}',${j})" title="desmarque: não vai hoje"></td>
+        <td><input class="cx" type="number" min="1" value="${i+1}" onchange="setCaixa('${b.id}',${j},this.value)"></td>
+        <td><input class="sku" value="${esc(x.cod)}" onchange="setCod('${b.id}',${j},this.value)"></td>
+        <td class="n"><input class="qt" type="number" min="1" value="${x.qty}" onchange="setQty('${b.id}',${j},this.value)"></td>
+        <td><button onclick="delLinha('${b.id}',${j})">🗑</button></td></tr>`;
     });
   });
   html+=`<tr class="tot"><td colspan="3">TOTAL</td>
@@ -1199,56 +1167,77 @@ function tabelaEdit(){
   window.scrollTo(0,wy);
 }
 
-function ref(i){materializa();return manuais[i];}
-function setQty(i,j,v){
+async function setQty(id,j,v){
   const q=+v; if(!(q>0)){commit('Quantidade inválida — nada alterado.');return;}
-  const b=ref(i); if(!b)return; b.rows[j].qty=q; commit('Quantidade atualizada.');
+  const b=box(id); if(!b||!b.rows[j])return;
+  b.rows[j].qty=q; await salvaB(b,'Quantidade atualizada.');
 }
-function setCod(i,j,v){
+async function setCod(id,j,v){
   const t=v.trim(); if(!t){commit('SKU vazio — nada alterado.');return;}
   const cod=montaCod(t);
   if(!cod){commit('SKU inválido — nada alterado.');return;}
-  const b=ref(i); if(!b)return; b.rows[j].cod=cod;
-  commit('SKU atualizado.');
+  const b=box(id); if(!b||!b.rows[j])return;
+  b.rows[j].cod=cod; await salvaB(b,'SKU atualizado.');
 }
-function setCaixa(i,j,v){
+async function setCaixa(id,j,v){
   let d=parseInt(v,10);
   if(!(d>0)){commit('Caixa inválida.');return;}
-  const b=ref(i); if(!b)return;
+  const b=box(id); if(!b||!b.rows[j])return;
+  const bx=caixas(), i=bx.findIndex(x=>x.id===id);
   if(d===i+1){tabelaEdit();return;}
   const linha=b.rows.splice(j,1)[0];
-  if(d>manuais.length)manuais.push({id:uid(),manual:true,rows:[linha]});
-  else manuais[d-1].rows.push(linha);
-  commit(`Linha movida para a caixa ${Math.min(d,manuais.length)}.`);
+  if(d>bx.length){
+    const novo={id:uid(),seq:proximaSeq(),manual:true,rows:[linha],alerta:linha.qty<CAP_MIN};
+    await gravaCaixa(novo); await salvaB(b,'Linha movida para a caixa '+(bx.length+1)+'.');
+  }else{
+    const dest=bx[d-1];
+    dest.rows.push(linha);
+    dest.alerta=tot(dest)<CAP_MIN;
+    await gravaCaixa(dest);
+    await salvaB(b,'Linha movida para a caixa '+d+'.');
+  }
 }
-function delLinha(i,j){const b=ref(i); if(!b)return; b.rows.splice(j,1); commit('Linha removida.');}
-function delCaixa(i){
+async function delLinha(id,j){
+  const b=box(id); if(!b||!b.rows[j])return;
+  b.rows.splice(j,1); await salvaB(b,'Linha removida.');
+}
+async function delCaixa(id){
+  const i=caixas().findIndex(b=>b.id===id);
   if(!confirm('Excluir a caixa '+(i+1)+' e todas as suas linhas?'))return;
-  snapshot(); materializa(); manuais.splice(i,1); commit('Caixa excluída.');
+  snapshot();
+  await removeCaixa(id);
+  commit('Caixa excluída.');
 }
-function novaCaixa(){
-  materializa(); manuais.push({id:uid(),manual:true,rows:[]});
-  $('#eCx').value=manuais.length;
-  $('#eInfo').textContent='Caixa '+manuais.length+' criada — adicione linhas nela.';
+async function novaCaixa(){
+  const b={id:uid(),seq:proximaSeq(),manual:true,rows:[],alerta:true};
+  mapa.set(b.id,b);
+  $('#eCx').value=caixas().length;
+  $('#eInfo').textContent='Caixa '+caixas().length+' criada — adicione linhas nela.';
   tabelaEdit();
 }
-function addLinhaEdit(){
+async function addLinhaEdit(){
   const sku=$('#eSku').value.trim(), tam=$('#eTam').value.trim(), q=+$('#eQt').value;
   let cx=parseInt($('#eCx').value,10);
   $('#eMsg').textContent='';
   if(!sku||!(q>0)){$('#eMsg').textContent='Informe SKU e quantidade.';return;}
   const cod=montaCod(sku,tam);
   if(!cod){$('#eMsg').textContent='SKU inválido.';return;}
-  materializa();
-  if(!(cx>0))cx=manuais.length||1;
-  if(cx>manuais.length)manuais.push({id:uid(),manual:true,rows:[{cod,qty:q}]});
-  else manuais[cx-1].rows.push({cod,qty:q});
+  const bx=caixas();
+  if(!(cx>0))cx=bx.length||1;
   $('#eSku').value='';$('#eTam').value='';$('#eQt').value='';$('#eSku').focus();
-  commit('Linha adicionada na caixa '+Math.min(cx,manuais.length)+'.');
+  if(cx>bx.length||!bx.length){
+    const b={id:uid(),seq:proximaSeq(),manual:true,rows:[{cod,qty:q}],alerta:q<CAP_MIN};
+    await gravaCaixa(b); commit('Linha adicionada na caixa '+(bx.length+1)+'.');
+  }else{
+    const b=bx[cx-1];
+    b.rows.push({cod,qty:q});
+    await salvaB(b,'Linha adicionada na caixa '+cx+'.');
+  }
 }
-function reordenar(){
-  materializa();
-  manuais.forEach(b=>b.rows.sort((a,c)=>a.cod.localeCompare(c.cod,'pt',{numeric:true})));
+async function reordenar(){
+  const bs=caixas();
+  bs.forEach(b=>b.rows.sort((a,c)=>a.cod.localeCompare(c.cod,'pt',{numeric:true})));
+  await gravaMuitas(bs);
   commit('Linhas reordenadas.');
 }
 
@@ -1284,7 +1273,7 @@ function render(){
   const bx=todas(), n=bx.length, lote=loteAtual();
   $('#cEtq').textContent=n;
   $('#cLin').textContent=bx.reduce((s,b)=>s+b.rows.length,0);
-  $('#info').textContent=`${n} etiqueta(s) · ${planilha.length} planilha / ${manuais.length} editáveis`
+  $('#info').textContent=`${n} etiqueta(s) no lote`
     +(retidos.length?` · ${retidos.length} retido(s)`:'');
 
   const alerts=bx.map((b,i)=>({b,i})).filter(o=>o.b.alerta);
@@ -1294,7 +1283,6 @@ function render(){
   $('#kAl').textContent=alerts.length;
   $('#kHold').textContent=retidos.reduce((s,l)=>s+l.qty,0);
 
-  /* aviso de duplicata em tempo real */
   const cc=new Map();
   bx.forEach(b=>{const k=sigConteudo(b);cc.set(k,(cc.get(k)||0)+1);});
   const nDup=[...cc.values()].filter(v=>v>1).length;
@@ -1478,23 +1466,30 @@ function imprimirRel(){
   w.document.close();w.focus();w.print();
 }
 
-/* ================= REALTIME + BOOT ================= */
-SB.channel('app_state_'+DOC_ID)
-  .on('postgres_changes',
-      {event:'*',schema:'public',table:'app_state',filter:'id=eq.'+DOC_ID},
-      p=>{
-        if(assina(p.new?.data)===ultimoEnvio)return;
-        baixaNuvem().then(m=>{ if(m)recarregaEstado(); });
-      })
-  .subscribe();
+/* ================= MIGRAÇÃO (rodar uma vez, no console) ================= */
+async function migraDoAppState(){
+  if(mapa.size&&!confirm('Já existem '+mapa.size+' caixas. Migrar e somar?'))return;
+  const {data}=await SB.from('app_state').select('data').eq('id','etiquetas-sp').maybeSingle();
+  const d=data?.data; if(!d){alert('Nada em app_state.');return;}
+  let man=[],hold=[],sb={};
+  try{ man=JSON.parse(d.etq_man2||'[]'); }catch(e){}
+  try{ hold=JSON.parse(d.etq_hold||'[]'); }catch(e){}
+  try{ sb=JSON.parse(d.etq_subs||'{}'); }catch(e){}
+  let seq=proximaSeq();
+  const bs=man.filter(b=>b&&Array.isArray(b.rows)&&b.rows.length)
+    .map(b=>({id:b.id||uid(),seq:(seq+=1000),manual:b.manual!==false,sku:b.sku??null,
+      alerta:!!b.alerta,origem:b.origem??null,rows:b.rows}));
+  await gravaMuitas(bs);
+  for(const l of hold.filter(l=>l&&l.cod&&+l.qty>0))
+    await gravaHold({cod:l.cod,qty:+l.qty,cx:+l.cx||0});
+  const pares=Object.entries(sb).map(([k,v])=>[norm(k),norm(v)]);
+  if(pares.length)await gravaSubs(pares);
+  if(d.etq_lote)localStorage.setItem(K_LOTE,d.etq_lote);
+  await carrega();
+  alert('Migrado: '+bs.length+' caixas, '+hold.length+' retidos, '+pares.length+' substituições.');
+}
 
-baixaNuvem()
-  .catch(()=>false)
-  .finally(()=>{
-    recarregaEstado();
-    prontoParaEnviar=true;
-    salvaTudo();     /* publica a limpeza feita no boot (era o furo B) */
-    snapshot();
-  });
+/* ================= BOOT ================= */
+carrega();
 </script>
 </html>
